@@ -4,7 +4,7 @@
   "description": "LUXORA E-commerce Backend",
   "main": "api/index.js",
   "engines": {
-    "node": "18.x"
+    "node": "24.x"
   },
   "scripts": {
     "start": "node server.js",
