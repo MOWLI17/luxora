@@ -1,4 +1,4 @@
-// server.js — FINAL PRODUCTION FIX (VERCEL READY)
+// server.js — FINAL PRODUCTION FIX (VERCEL READY) - FIXED VERSION
 
 const express = require('express');
 const cors = require('cors');
@@ -44,36 +44,6 @@ app.options('*', cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-
-/* =======================
-   MONGODB CONNECTION
-======================= */
-
-let isConnected = false;
-
-const connectDB = async () => {
-  if (isConnected) {
-    console.log('[DB] Already connected');
-    return;
-  }
-
-  try {
-    console.log('[DB] Connecting to MongoDB...');
-    const db = await mongoose.connect(process.env.MONGODB_URI, {
-      serverSelectionTimeoutMS: 5000,
-      maxPoolSize: 10,
-    });
-
-    isConnected = db.connections[0].readyState === 1;
-    console.log('✅ MongoDB connected');
-  } catch (error) {
-    console.error('❌ MongoDB connection failed:', error.message);
-    throw error;
-  }
-};
-
-// 🔥 IMPORTANT: ALWAYS CONNECT (Vercel needs this)
-connectDB();
 
 /* =======================
    ROUTES
