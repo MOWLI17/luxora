@@ -46,6 +46,15 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 /* =======================
+   DEBUG ROUTES (Development)
+======================= */
+
+if (process.env.NODE_ENV !== 'production' || process.env.DEBUG === 'true') {
+  app.use('/api/debug', require('./routes/debug'));
+  console.log('[ROUTES] Debug routes enabled');
+}
+
+/* =======================
    ROUTES
 ======================= */
 
