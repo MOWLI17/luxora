@@ -58,8 +58,9 @@ if (process.env.NODE_ENV !== 'production' || process.env.DEBUG === 'true') {
    ROUTES
 ======================= */
 
+// ✅ IMPORTANT: Order matters - more specific routes first
 app.use('/api/auth', require('./routes/auth'));
-app.use('/api/seller/auth', require('./routes/sellerAuth'));
+app.use('/api/seller/auth', require('./routes/sellerAuth'));  // ✅ FIXED: This handles /api/seller/auth/login
 app.use('/api/products', require('./routes/products'));
 app.use('/api/cart', require('./routes/cart'));
 app.use('/api/wishlist', require('./routes/wishlist'));
