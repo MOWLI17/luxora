@@ -1,7 +1,7 @@
-// routes/sellerAuth.js - COMPLETE SELLER AUTHENTICATION (FIXED)
+// routes/sellerAuth.js - FIXED with Database Connection Checks
 const express = require('express');
 const router = express.Router();
-const Seller = require('../models/Seller');
+const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
@@ -10,10 +10,31 @@ const { sellerProtect } = require('../middleware/auth');
 
 console.log('[SELLER AUTH] Seller auth routes loaded');
 
+// ✅ Lazy load models
+let Seller, Product, Order;
+const getModels = () => {
+  if (!Seller) Seller = require('../models/Seller');
+  if (!Product) Product = require('../models/Product');
+  if (!Order) Order = require('../models/Order');
+  return { Seller, Product, Order };
+};
+
+// ✅ Helper to check DB connection
+const checkDB = (res) => {
+  if (mongoose.connection.readyState !== 1) {
+    res.status(503).json({
+      success: false,
+      message: 'Database service unavailable. Please try again.'
+    });
+    return false;
+  }
+  return true;
+};
+
 // ======= JWT TOKEN GENERATOR =======
 const generateToken = (id) => {
   return jwt.sign(
-    { id, isSeller: true },  // ✅ FIXED: Added isSeller flag
+    { id, isSeller: true },
     process.env.JWT_SECRET || 'your_secret_key',
     { expiresIn: process.env.JWT_EXPIRE || '7d' }
   );
@@ -29,12 +50,13 @@ const transporter = nodemailer.createTransport({
 });
 
 // ======= SELLER REGISTER ROUTE =======
-// @route   POST /api/seller/auth/register
-// @desc    Register a new seller
-// @access  Public
 router.post('/register', async (req, res) => {
   try {
     console.log('[SELLER] Processing registration request...');
+    
+    if (!checkDB(res)) return;
+
+    const { Seller: SellerModel } = getModels();
     
     const {
       fullName, email, phone, password, confirmPassword,
@@ -87,12 +109,12 @@ router.post('/register', async (req, res) => {
     }
 
     // Check if seller already exists
-    const existingSeller = await Seller.findOne({
+    const existingSeller = await SellerModel.findOne({
       $or: [
         { email: email.toLowerCase() },
         { phone: phoneDigits.slice(-10) }
       ]
-    });
+    }).maxTimeMS(10000);
 
     if (existingSeller) {
       console.log('[SELLER] Seller already exists:', existingSeller.email || existingSeller.phone);
@@ -105,7 +127,7 @@ router.post('/register', async (req, res) => {
     }
 
     // Create new seller
-    const seller = new Seller({
+    const seller = new SellerModel({
       fullName: fullName.trim(),
       email: email.toLowerCase().trim(),
       phone: phoneDigits.slice(-10),
@@ -177,12 +199,13 @@ router.post('/register', async (req, res) => {
 });
 
 // ======= SELLER LOGIN ROUTE =======
-// @route   POST /api/seller/auth/login
-// @desc    Login seller with email and password
-// @access  Public
 router.post('/login', async (req, res) => {
   try {
     console.log('[SELLER] Processing login request...');
+    
+    if (!checkDB(res)) return;
+
+    const { Seller: SellerModel } = getModels();
     
     const { email, password } = req.body;
 
@@ -195,9 +218,9 @@ router.post('/login', async (req, res) => {
     }
 
     // Find seller by email (include password field for comparison)
-    const seller = await Seller.findOne({
+    const seller = await SellerModel.findOne({
       email: email.toLowerCase()
-    }).select('+password');
+    }).select('+password').maxTimeMS(10000);
 
     if (!seller) {
       console.log('[SELLER] Seller not found:', email);
@@ -260,14 +283,15 @@ router.post('/login', async (req, res) => {
 });
 
 // ======= GET SELLER PROFILE =======
-// @route   GET /api/seller/auth/profile
-// @desc    Get current seller profile
-// @access  Private (Seller only)
 router.get('/profile', sellerProtect, async (req, res) => {
   try {
     console.log('[SELLER] Fetching profile for seller:', req.sellerId);
 
-    const seller = await Seller.findById(req.sellerId);
+    if (!checkDB(res)) return;
+
+    const { Seller: SellerModel } = getModels();
+
+    const seller = await SellerModel.findById(req.sellerId).maxTimeMS(10000);
 
     if (!seller) {
       return res.status(404).json({
@@ -303,81 +327,19 @@ router.get('/profile', sellerProtect, async (req, res) => {
   }
 });
 
-// ======= UPDATE SELLER PROFILE =======
-// @route   PUT /api/seller/auth/profile
-// @desc    Update seller profile
-// @access  Private (Seller only)
-router.put('/profile', sellerProtect, async (req, res) => {
-  try {
-    console.log('[SELLER] Updating profile for seller:', req.sellerId);
-
-    const {
-      fullName, phone, businessName, businessType, businessAddress,
-      city, state, zipCode, storeName, storeDescription, productCategory,
-      bankName, accountHolderName, ifscCode, taxId, gstNumber, panNumber
-    } = req.body;
-
-    // Find seller
-    const seller = await Seller.findById(req.sellerId);
-
-    if (!seller) {
-      return res.status(404).json({
-        success: false,
-        message: 'Seller not found'
-      });
-    }
-
-    // Update fields if provided
-    if (fullName) seller.fullName = fullName.trim();
-    if (phone) seller.phone = phone.trim();
-    if (businessName) seller.businessName = businessName.trim();
-    if (businessType) seller.businessType = businessType;
-    if (businessAddress) seller.businessAddress = businessAddress.trim();
-    if (city) seller.city = city.trim();
-    if (state) seller.state = state.trim();
-    if (zipCode) seller.zipCode = zipCode.trim();
-    if (storeName) seller.storeName = storeName.trim();
-    if (storeDescription) seller.storeDescription = storeDescription.trim();
-    if (productCategory) seller.productCategory = productCategory;
-    if (bankName) seller.bankName = bankName.trim();
-    if (accountHolderName) seller.accountHolderName = accountHolderName.trim();
-    if (ifscCode) seller.ifscCode = ifscCode.trim();
-    if (taxId) seller.taxId = taxId;
-    if (gstNumber) seller.gstNumber = gstNumber;
-    if (panNumber) seller.panNumber = panNumber;
-
-    // Save seller
-    await seller.save();
-
-    console.log('[SELLER] Profile updated for seller:', req.sellerId);
-
-    const sellerResponse = seller.getPublicData ? seller.getPublicData() : seller;
-
-    res.status(200).json({
-      success: true,
-      message: 'Profile updated successfully',
-      seller: sellerResponse
-    });
-
-  } catch (error) {
-    console.error('[SELLER] Update profile error:', error.message);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to update profile'
-    });
-  }
-});
-
 // ======= GET SELLER PRODUCTS =======
-// @route   GET /api/seller/auth/products
-// @desc    Get all products for this seller
-// @access  Private (Seller only)
 router.get('/products', sellerProtect, async (req, res) => {
   try {
     console.log('[SELLER] Fetching products for seller:', req.sellerId);
 
-    const Product = require('../models/Product');
-    const products = await Product.find({ seller: req.sellerId }).sort({ createdAt: -1 });
+    if (!checkDB(res)) return;
+
+    const { Product: ProductModel } = getModels();
+
+    const products = await ProductModel.find({ seller: req.sellerId })
+      .sort({ createdAt: -1 })
+      .maxTimeMS(15000)
+      .exec();
 
     console.log(`[SELLER] Found ${products.length} products`);
 
@@ -397,28 +359,31 @@ router.get('/products', sellerProtect, async (req, res) => {
 });
 
 // ======= GET SELLER ORDERS =======
-// @route   GET /api/seller/auth/orders
-// @desc    Get all orders for seller's products
-// @access  Private (Seller only)
 router.get('/orders', sellerProtect, async (req, res) => {
   try {
     console.log('[SELLER] Fetching orders for seller:', req.sellerId);
 
-    const Product = require('../models/Product');
-    const Order = require('../models/Order');
+    if (!checkDB(res)) return;
+
+    const { Product: ProductModel, Order: OrderModel } = getModels();
 
     // Find all products for this seller
-    const sellerProducts = await Product.find({ seller: req.sellerId }).select('_id');
+    const sellerProducts = await ProductModel.find({ seller: req.sellerId })
+      .select('_id')
+      .maxTimeMS(10000);
+    
     const productIds = sellerProducts.map(p => p._id);
 
     // Find all orders containing these products
-    const orders = await Order.find({
+    const orders = await OrderModel.find({
       'items.productId': { $in: productIds }
     })
       .populate('userId', 'name email mobile')
       .populate('items.productId', 'name price')
       .sort({ createdAt: -1 })
-      .limit(100);
+      .limit(100)
+      .maxTimeMS(15000)
+      .exec();
 
     console.log(`[SELLER] Found ${orders.length} orders`);
 
@@ -451,12 +416,11 @@ router.get('/orders', sellerProtect, async (req, res) => {
 });
 
 // ======= UPDATE ORDER STATUS =======
-// @route   PUT /api/seller/auth/orders/:orderId/status
-// @desc    Update order status
-// @access  Private (Seller only)
 router.put('/orders/:orderId/status', sellerProtect, async (req, res) => {
   try {
     console.log('[SELLER] Updating order status:', req.params.orderId);
+
+    if (!checkDB(res)) return;
 
     const { status } = req.body;
     const validStatuses = ['pending', 'Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
@@ -468,15 +432,17 @@ router.put('/orders/:orderId/status', sellerProtect, async (req, res) => {
       });
     }
 
-    const Product = require('../models/Product');
-    const Order = require('../models/Order');
+    const { Product: ProductModel, Order: OrderModel } = getModels();
 
     // Get seller's products
-    const sellerProducts = await Product.find({ seller: req.sellerId }).select('_id');
+    const sellerProducts = await ProductModel.find({ seller: req.sellerId })
+      .select('_id')
+      .maxTimeMS(10000);
+    
     const productIds = sellerProducts.map(p => p._id);
 
     // Find order
-    const order = await Order.findById(req.params.orderId);
+    const order = await OrderModel.findById(req.params.orderId).maxTimeMS(10000);
 
     if (!order) {
       return res.status(404).json({
@@ -523,9 +489,6 @@ router.put('/orders/:orderId/status', sellerProtect, async (req, res) => {
 });
 
 // ======= LOGOUT ROUTE =======
-// @route   POST /api/seller/auth/logout
-// @desc    Logout seller
-// @access  Private (Seller only)
 router.post('/logout', sellerProtect, (req, res) => {
   console.log('[SELLER] Seller logged out:', req.sellerId);
   res.status(200).json({
