@@ -1,10 +1,29 @@
-// routes/order.js - FIXED Orders Routes
+// routes/order.js - FIXED with Database Connection Checks
 const express = require('express');
 const router = express.Router();
-const Order = require('../models/Order');
+const mongoose = require('mongoose');
 const { protect } = require('../middleware/auth');
 
 console.log('[ROUTES] Orders routes loaded');
+
+// ✅ Lazy load models
+let Order;
+const getModels = () => {
+  if (!Order) Order = require('../models/Order');
+  return { Order };
+};
+
+// ✅ Helper to check DB connection
+const checkDB = (res) => {
+  if (mongoose.connection.readyState !== 1) {
+    res.status(503).json({
+      success: false,
+      message: 'Database service unavailable. Please try again.'
+    });
+    return false;
+  }
+  return true;
+};
 
 // ======= GET ALL USER ORDERS =======
 // @route   GET /api/orders
@@ -12,12 +31,16 @@ console.log('[ROUTES] Orders routes loaded');
 // @access  Private
 router.get('/', protect, async (req, res) => {
   try {
-    console.log('[ORDERS] Fetching orders for user:', req.user._id);
+    console.log('[ORDERS] Fetching orders for user:', req.userId);
+    
+    if (!checkDB(res)) return;
+
+    const { Order: OrderModel } = getModels();
     
     const { status, limit = 50, page = 1 } = req.query;
     
     // Build query
-    const query = { userId: req.user._id };
+    const query = { userId: req.userId };
     if (status && status !== 'all') {
       query.status = status;
     }
@@ -25,16 +48,17 @@ router.get('/', protect, async (req, res) => {
     // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // ✅ FIXED: Populate 'items.productId' (matches the schema)
-    const orders = await Order.find(query)
+    const orders = await OrderModel.find(query)
       .populate('items.productId', 'name description images price category brand')
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .skip(skip)
-      .lean();
+      .maxTimeMS(15000)
+      .lean()
+      .exec();
 
     // Get total count for pagination
-    const totalOrders = await Order.countDocuments(query);
+    const totalOrders = await OrderModel.countDocuments(query).maxTimeMS(10000);
 
     console.log(`[ORDERS] Found ${orders.length} orders for user`);
 
@@ -69,9 +93,14 @@ router.get('/:id', protect, async (req, res) => {
   try {
     console.log('[ORDERS] Fetching order:', req.params.id);
     
-    // ✅ FIXED: Populate 'items.productId'
-    const order = await Order.findById(req.params.id)
-      .populate('items.productId', 'name description images price category brand');
+    if (!checkDB(res)) return;
+
+    const { Order: OrderModel } = getModels();
+
+    const order = await OrderModel.findById(req.params.id)
+      .populate('items.productId', 'name description images price category brand')
+      .maxTimeMS(10000)
+      .exec();
 
     if (!order) {
       return res.status(404).json({
@@ -81,7 +110,7 @@ router.get('/:id', protect, async (req, res) => {
     }
 
     // Check if order belongs to user
-    if (order.userId.toString() !== req.user._id.toString()) {
+    if (order.userId.toString() !== req.userId.toString()) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to view this order'
@@ -93,9 +122,7 @@ router.get('/:id', protect, async (req, res) => {
     res.json({
       success: true,
       message: 'Order retrieved successfully',
-      data: {
-        order
-      }
+      data: { order }
     });
 
   } catch (error) {
@@ -115,9 +142,12 @@ router.put('/:id/cancel', protect, async (req, res) => {
   try {
     console.log('[ORDERS] Cancelling order:', req.params.id);
     
-    const { cancelReason } = req.body;
+    if (!checkDB(res)) return;
 
-    const order = await Order.findById(req.params.id);
+    const { cancelReason } = req.body;
+    const { Order: OrderModel } = getModels();
+
+    const order = await OrderModel.findById(req.params.id).maxTimeMS(10000);
 
     if (!order) {
       return res.status(404).json({
@@ -127,7 +157,7 @@ router.put('/:id/cancel', protect, async (req, res) => {
     }
 
     // Check if order belongs to user
-    if (order.userId.toString() !== req.user._id.toString()) {
+    if (order.userId.toString() !== req.userId.toString()) {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to cancel this order'
@@ -161,9 +191,7 @@ router.put('/:id/cancel', protect, async (req, res) => {
     res.json({
       success: true,
       message: 'Order cancelled successfully',
-      data: {
-        order
-      }
+      data: { order }
     });
 
   } catch (error) {
@@ -176,15 +204,19 @@ router.put('/:id/cancel', protect, async (req, res) => {
 });
 
 // ======= GET ORDER STATISTICS =======
-// @route   GET /api/orders/user/stats
+// @route   GET /api/orders/stats
 // @desc    Get order statistics for user
 // @access  Private
-router.get('/user/stats', protect, async (req, res) => {
+router.get('/stats/user', protect, async (req, res) => {
   try {
-    console.log('[ORDERS] Fetching stats for user:', req.user._id);
+    console.log('[ORDERS] Fetching stats for user:', req.userId);
     
-    const stats = await Order.aggregate([
-      { $match: { userId: req.user._id } },
+    if (!checkDB(res)) return;
+
+    const { Order: OrderModel } = getModels();
+
+    const stats = await OrderModel.aggregate([
+      { $match: { userId: mongoose.Types.ObjectId(req.userId) } },
       {
         $group: {
           _id: null,
@@ -195,8 +227,8 @@ router.get('/user/stats', protect, async (req, res) => {
       }
     ]);
 
-    const statusCounts = await Order.aggregate([
-      { $match: { userId: req.user._id } },
+    const statusCounts = await OrderModel.aggregate([
+      { $match: { userId: mongoose.Types.ObjectId(req.userId) } },
       {
         $group: {
           _id: '$status',
