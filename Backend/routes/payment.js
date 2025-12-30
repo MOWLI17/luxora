@@ -1,12 +1,32 @@
+// routes/payment.js - FIXED with Database Connection Checks
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY || 'sk_test_dummy');
-const Order = require('../models/Order');
-const Cart = require('../models/Cart');
-const Product = require('../models/Product');
 const { protect } = require('../middleware/auth');
 
 console.log('[ROUTES] Payment routes loaded');
+
+// ✅ Lazy load models
+let Order, Cart, Product;
+const getModels = () => {
+  if (!Order) Order = require('../models/Order');
+  if (!Cart) Cart = require('../models/Cart');
+  if (!Product) Product = require('../models/Product');
+  return { Order, Cart, Product };
+};
+
+// ✅ Helper to check DB connection
+const checkDB = (res) => {
+  if (mongoose.connection.readyState !== 1) {
+    res.status(503).json({
+      success: false,
+      message: 'Database service unavailable. Please try again.'
+    });
+    return false;
+  }
+  return true;
+};
 
 // ✅ @route   POST /api/payment/create-payment-intent
 // ✅ @desc    Create Stripe payment intent
@@ -14,6 +34,9 @@ console.log('[ROUTES] Payment routes loaded');
 router.post('/create-payment-intent', protect, async (req, res) => {
   try {
     console.log('[PAYMENT] Creating payment intent');
+    
+    if (!checkDB(res)) return;
+
     const { amount, currency = 'inr' } = req.body;
 
     if (!amount || amount <= 0) {
@@ -28,9 +51,9 @@ router.post('/create-payment-intent', protect, async (req, res) => {
       amount: Math.round(amount * 100),
       currency,
       metadata: {
-        userId: req.user._id.toString(),
-        userName: req.user.name,
-        userEmail: req.user.email
+        userId: req.userId.toString(),
+        userName: req.user?.name || 'Unknown',
+        userEmail: req.user?.email || 'unknown@email.com'
       }
     });
 
@@ -56,7 +79,9 @@ router.post('/create-payment-intent', protect, async (req, res) => {
 // ✅ @access  Private (User)
 router.post('/create-order', protect, async (req, res) => {
   try {
-    console.log('[PAYMENT] Creating order for user:', req.user._id);
+    console.log('[PAYMENT] Creating order for user:', req.userId);
+
+    if (!checkDB(res)) return;
 
     const { 
       cartItems, 
@@ -64,6 +89,8 @@ router.post('/create-order', protect, async (req, res) => {
       paymentMethod, 
       paymentIntentId 
     } = req.body;
+
+    const { Order: OrderModel, Product: ProductModel, Cart: CartModel } = getModels();
 
     console.log('[PAYMENT] Received payment method:', paymentMethod);
 
@@ -87,7 +114,7 @@ router.post('/create-order', protect, async (req, res) => {
     let totalAmount = 0;
 
     for (const item of cartItems) {
-      const product = await Product.findById(item.productId);
+      const product = await ProductModel.findById(item.productId).maxTimeMS(10000);
       
       if (!product) {
         return res.status(404).json({ 
@@ -115,13 +142,14 @@ router.post('/create-order', protect, async (req, res) => {
 
     // Reduce stock
     for (const item of orderItems) {
-      await Product.findByIdAndUpdate(
+      await ProductModel.findByIdAndUpdate(
         item.productId,
-        { $inc: { stock: -item.quantity } }
+        { $inc: { stock: -item.quantity } },
+        { maxTimeMS: 10000 }
       );
     }
 
-    // ✅ FIXED: Accept payment method as-is (already validated in schema)
+    // ✅ Accept payment method as-is
     const finalPaymentMethod = paymentMethod || 'cod';
 
     console.log('[PAYMENT] Final payment method:', finalPaymentMethod);
@@ -139,12 +167,12 @@ router.post('/create-order', protect, async (req, res) => {
     }
 
     // Create order
-    const order = await Order.create({
-      userId: req.user._id,
-      sellerId: null,  // ✅ FIXED: Set to null (optional field)
+    const order = await OrderModel.create({
+      userId: req.userId,
+      sellerId: null,
       items: orderItems,
       totalAmount,
-      paymentMethod: finalPaymentMethod,  // ✅ FIXED: Use as provided
+      paymentMethod: finalPaymentMethod,
       paymentStatus,
       orderStatus,
       transactionId: paymentIntentId || null,
@@ -154,9 +182,10 @@ router.post('/create-order', protect, async (req, res) => {
     console.log('[PAYMENT] Order created:', order._id);
 
     // Clear user's cart if exists
-    await Cart.findOneAndUpdate(
-      { user: req.user._id },
-      { items: [] }
+    await CartModel.findOneAndUpdate(
+      { user: req.userId },
+      { items: [] },
+      { maxTimeMS: 10000 }
     );
 
     await order.populate('userId', 'name email');
@@ -165,9 +194,7 @@ router.post('/create-order', protect, async (req, res) => {
     res.status(201).json({ 
       success: true, 
       message: 'Order created successfully',
-      data: {
-        order
-      }
+      data: { order }
     });
 
   } catch (error) {
@@ -186,7 +213,10 @@ router.post('/confirm-payment', protect, async (req, res) => {
   try {
     console.log('[PAYMENT] Confirming payment');
 
+    if (!checkDB(res)) return;
+
     const { orderId, paymentIntentId } = req.body;
+    const { Order: OrderModel } = getModels();
 
     if (!orderId) {
       return res.status(400).json({ 
@@ -196,7 +226,7 @@ router.post('/confirm-payment', protect, async (req, res) => {
     }
 
     // Find order
-    const order = await Order.findById(orderId);
+    const order = await OrderModel.findById(orderId).maxTimeMS(10000);
 
     if (!order) {
       return res.status(404).json({ 
@@ -206,7 +236,7 @@ router.post('/confirm-payment', protect, async (req, res) => {
     }
 
     // Check if order belongs to current user
-    if (order.userId.toString() !== req.user._id.toString()) {
+    if (order.userId.toString() !== req.userId.toString()) {
       return res.status(403).json({ 
         success: false, 
         message: 'Not authorized to confirm this order' 
@@ -228,9 +258,7 @@ router.post('/confirm-payment', protect, async (req, res) => {
     res.json({
       success: true,
       message: 'Payment confirmed successfully',
-      data: {
-        order
-      }
+      data: { order }
     });
 
   } catch (error) {
