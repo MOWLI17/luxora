@@ -1,45 +1,28 @@
-// routes/products.js - FIXED FOR VERCEL
-
+// routes/products.js - FIXED with Database Connection Checks
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 
-// ✅ CRITICAL: Lazy import models to ensure DB is connected first
-let Product;
-let Review;
+console.log('[ROUTES] Products routes loaded');
 
-// Ensure models are loaded
-const getModels = () => {
+// ✅ Lazy load models to ensure DB is connected first
+let Product;
+const getProduct = () => {
   if (!Product) {
-    try {
-      Product = mongoose.model('Product') || require('../models/Product');
-    } catch (error) {
-      console.error('[PRODUCTS] Error loading Product model:', error.message);
-      throw new Error('Product model not initialized');
-    }
+    Product = require('../models/Product');
   }
-  
-  if (!Review) {
-    try {
-      Review = mongoose.model('Review') || require('../models/Review');
-    } catch (error) {
-      console.log('[PRODUCTS] Review model not found (optional)');
-    }
-  }
-  
-  return { Product, Review };
+  return Product;
 };
 
 /* ========================
    GET ALL PRODUCTS
 ======================== */
-
 router.get('/', async (req, res) => {
   try {
     console.log('[PRODUCTS] GET / - Fetching products');
     console.log('[PRODUCTS] DB Connection State:', mongoose.connection.readyState);
     
-    // Check if database is connected
+    // ✅ Check if database is connected FIRST
     if (mongoose.connection.readyState !== 1) {
       console.error('[PRODUCTS] ❌ Database not connected. State:', mongoose.connection.readyState);
       return res.status(503).json({
@@ -49,8 +32,8 @@ router.get('/', async (req, res) => {
       });
     }
 
-    // Load models
-    const { Product: ProductModel } = getModels();
+    // Get the Product model
+    const ProductModel = getProduct();
 
     // Extract query parameters
     const { 
@@ -66,12 +49,12 @@ router.get('/', async (req, res) => {
 
     // Build filter object
     let filter = {
-      price: { $gte: minPrice, $lte: maxPrice },
-      rating: { $gte: minRating }
+      price: { $gte: parseInt(minPrice), $lte: parseInt(maxPrice) },
+      rating: { $gte: parseInt(minRating) }
     };
 
     // Add search filter
-    if (search) {
+    if (search && search.trim()) {
       filter.$or = [
         { name: { $regex: search, $options: 'i' } },
         { description: { $regex: search, $options: 'i' } }
@@ -79,7 +62,7 @@ router.get('/', async (req, res) => {
     }
 
     // Add category filter
-    if (category) {
+    if (category && category.trim()) {
       filter.category = category;
     }
 
@@ -90,17 +73,17 @@ router.get('/', async (req, res) => {
     const limitNum = parseInt(limit) || 20;
     const skip = (pageNum - 1) * limitNum;
 
-    // Execute query with timeout
-    const query = ProductModel.find(filter)
+    // ✅ Execute query with timeout
+    const products = await ProductModel.find(filter)
       .sort(sort)
       .skip(skip)
       .limit(limitNum)
-      .maxTimeMS(10000); // 10 second timeout on query
-
-    const products = await query.exec();
+      .maxTimeMS(15000)
+      .lean()
+      .exec();
 
     // Get total count
-    const total = await ProductModel.countDocuments(filter);
+    const total = await ProductModel.countDocuments(filter).maxTimeMS(10000);
 
     console.log('[PRODUCTS] ✅ Found', products.length, 'products');
 
@@ -119,7 +102,6 @@ router.get('/', async (req, res) => {
     console.error('[PRODUCTS] ❌ Error fetching products:', error.message);
     console.error('[PRODUCTS] Stack:', error.stack);
 
-    // Don't expose internal errors in production
     res.status(500).json({
       success: false,
       message: 'Error fetching products',
@@ -131,11 +113,11 @@ router.get('/', async (req, res) => {
 /* ========================
    GET SINGLE PRODUCT
 ======================== */
-
 router.get('/:id', async (req, res) => {
   try {
     console.log('[PRODUCTS] GET /:id - Fetching product:', req.params.id);
 
+    // ✅ Check database connection
     if (mongoose.connection.readyState !== 1) {
       return res.status(503).json({
         success: false,
@@ -143,7 +125,7 @@ router.get('/:id', async (req, res) => {
       });
     }
 
-    const { Product: ProductModel } = getModels();
+    const ProductModel = getProduct();
 
     // Validate MongoDB ObjectId
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -155,6 +137,7 @@ router.get('/:id', async (req, res) => {
 
     const product = await ProductModel.findById(req.params.id)
       .maxTimeMS(10000)
+      .lean()
       .exec();
 
     if (!product) {
@@ -185,7 +168,6 @@ router.get('/:id', async (req, res) => {
 /* ========================
    SEARCH PRODUCTS
 ======================== */
-
 router.get('/search/q', async (req, res) => {
   try {
     const { q } = req.query;
@@ -197,6 +179,7 @@ router.get('/search/q', async (req, res) => {
       });
     }
 
+    // ✅ Check database connection
     if (mongoose.connection.readyState !== 1) {
       return res.status(503).json({
         success: false,
@@ -204,7 +187,7 @@ router.get('/search/q', async (req, res) => {
       });
     }
 
-    const { Product: ProductModel } = getModels();
+    const ProductModel = getProduct();
 
     const products = await ProductModel.find({
       $or: [
@@ -214,6 +197,7 @@ router.get('/search/q', async (req, res) => {
     })
       .limit(20)
       .maxTimeMS(10000)
+      .lean()
       .exec();
 
     console.log('[PRODUCTS] ✅ Search found', products.length, 'results');
@@ -233,18 +217,6 @@ router.get('/search/q', async (req, res) => {
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
-});
-
-/* ========================
-   ERROR HANDLING
-======================== */
-
-router.use((err, req, res, next) => {
-  console.error('[PRODUCTS] Route error:', err.message);
-  res.status(500).json({
-    success: false,
-    message: 'Internal server error'
-  });
 });
 
 module.exports = router;
