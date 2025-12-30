@@ -1,13 +1,22 @@
-// routes/auth.js
+// routes/auth.js - FIXED with Database Connection Checks
 const express = require('express');
 const router = express.Router();
-const User = require('../models/User');
+const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const { protect, authorize } = require('../middleware/auth');
 
 console.log('[ROUTES] Auth routes loaded');
+
+// ✅ Lazy load models to ensure DB connection first
+let User;
+const getUser = () => {
+  if (!User) {
+    User = require('../models/User');
+  }
+  return User;
+};
 
 // ======= JWT TOKEN GENERATOR =======
 const generateToken = (id, type = 'user') => {
@@ -39,13 +48,20 @@ const validateMobile = (mobile) => {
 };
 
 // ======= REGISTER ROUTE =======
-// @route   POST /api/auth/register
-// @desc    Register a new user
-// @access  Public
 router.post('/register', async (req, res) => {
   try {
     console.log('[AUTH] Processing registration request...');
     
+    // ✅ Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      console.error('[AUTH] ❌ Database not connected');
+      return res.status(503).json({
+        success: false,
+        message: 'Database service unavailable. Please try again.'
+      });
+    }
+
+    const UserModel = getUser();
     const { name, email, mobile, password, address } = req.body;
 
     // Validate required fields
@@ -81,12 +97,12 @@ router.post('/register', async (req, res) => {
     }
 
     // Check if user already exists
-    const existingUser = await User.findOne({
+    const existingUser = await UserModel.findOne({
       $or: [
         { email: email.toLowerCase() },
         { mobile }
       ]
-    });
+    }).maxTimeMS(10000);
 
     if (existingUser) {
       console.log('[AUTH] User already exists:', existingUser.email || existingUser.mobile);
@@ -99,7 +115,7 @@ router.post('/register', async (req, res) => {
     }
 
     // Create new user
-    const user = new User({
+    const user = new UserModel({
       name: name.trim(),
       email: email.trim().toLowerCase(),
       mobile: mobile.trim(),
@@ -157,13 +173,20 @@ router.post('/register', async (req, res) => {
 });
 
 // ======= LOGIN ROUTE =======
-// @route   POST /api/auth/login
-// @desc    Login user with email or mobile
-// @access  Public
 router.post('/login', async (req, res) => {
   try {
     console.log('[AUTH] Processing login request...');
     
+    // ✅ Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      console.error('[AUTH] ❌ Database not connected');
+      return res.status(503).json({
+        success: false,
+        message: 'Database service unavailable. Please try again.'
+      });
+    }
+
+    const UserModel = getUser();
     const { emailOrMobile, password } = req.body;
 
     // Validate required fields
@@ -175,12 +198,12 @@ router.post('/login', async (req, res) => {
     }
 
     // Find user by email or mobile (include password field)
-    const user = await User.findOne({
+    const user = await UserModel.findOne({
       $or: [
         { email: emailOrMobile.toLowerCase() },
         { mobile: emailOrMobile }
       ]
-    }).select('+password');
+    }).select('+password').maxTimeMS(10000);
 
     if (!user) {
       console.log('[AUTH] User not found:', emailOrMobile);
@@ -248,9 +271,6 @@ router.post('/login', async (req, res) => {
 });
 
 // ======= LOGOUT ROUTE =======
-// @route   POST /api/auth/logout
-// @desc    Logout user (client clears token)
-// @access  Private
 router.post('/logout', protect, (req, res) => {
   console.log('[AUTH] User logged out:', req.userId);
   res.json({
@@ -260,14 +280,20 @@ router.post('/logout', protect, (req, res) => {
 });
 
 // ======= GET PROFILE ROUTE =======
-// @route   GET /api/auth/profile
-// @desc    Get current user profile
-// @access  Private
 router.get('/profile', protect, async (req, res) => {
   try {
     console.log('[AUTH] Fetching profile for user:', req.userId);
 
-    const user = await User.findById(req.userId);
+    // ✅ Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database service unavailable'
+      });
+    }
+
+    const UserModel = getUser();
+    const user = await UserModel.findById(req.userId).maxTimeMS(10000);
 
     if (!user) {
       return res.status(404).json({
@@ -302,13 +328,19 @@ router.get('/profile', protect, async (req, res) => {
 });
 
 // ======= UPDATE PROFILE ROUTE =======
-// @route   PUT /api/auth/profile
-// @desc    Update user profile
-// @access  Private
 router.put('/profile', protect, async (req, res) => {
   try {
     console.log('[AUTH] Updating profile for user:', req.userId);
 
+    // ✅ Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database service unavailable'
+      });
+    }
+
+    const UserModel = getUser();
     const { name, email, mobile, address } = req.body;
 
     // Validate email if provided
@@ -329,10 +361,10 @@ router.put('/profile', protect, async (req, res) => {
 
     // Check if email/mobile already exists (excluding current user)
     if (email) {
-      const emailExists = await User.findOne({
+      const emailExists = await UserModel.findOne({
         email: email.toLowerCase(),
         _id: { $ne: req.userId }
-      });
+      }).maxTimeMS(10000);
       if (emailExists) {
         return res.status(409).json({
           success: false,
@@ -342,10 +374,10 @@ router.put('/profile', protect, async (req, res) => {
     }
 
     if (mobile) {
-      const mobileExists = await User.findOne({
+      const mobileExists = await UserModel.findOne({
         mobile,
         _id: { $ne: req.userId }
-      });
+      }).maxTimeMS(10000);
       if (mobileExists) {
         return res.status(409).json({
           success: false,
@@ -361,11 +393,11 @@ router.put('/profile', protect, async (req, res) => {
     if (mobile) updateData.mobile = mobile;
     if (address) updateData.address = address;
 
-    const user = await User.findByIdAndUpdate(
+    const user = await UserModel.findByIdAndUpdate(
       req.userId,
       updateData,
       { new: true, runValidators: true }
-    );
+    ).maxTimeMS(10000);
 
     console.log('[AUTH] Profile updated for user:', req.userId);
 
@@ -394,14 +426,20 @@ router.put('/profile', protect, async (req, res) => {
 });
 
 // ======= DELETE ACCOUNT ROUTE =======
-// @route   DELETE /api/auth/profile
-// @desc    Delete user account
-// @access  Private
 router.delete('/profile', protect, async (req, res) => {
   try {
     console.log('[AUTH] Deleting account for user:', req.userId);
 
-    await User.findByIdAndDelete(req.userId);
+    // ✅ Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database service unavailable'
+      });
+    }
+
+    const UserModel = getUser();
+    await UserModel.findByIdAndDelete(req.userId);
 
     console.log('[AUTH] Account deleted for user:', req.userId);
 
@@ -415,213 +453,6 @@ router.delete('/profile', protect, async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to delete account'
-    });
-  }
-});
-
-// ======= FORGOT PASSWORD ROUTE =======
-// @route   POST /api/auth/forgot-password
-// @desc    Request password reset email
-// @access  Public
-router.post('/forgot-password', async (req, res) => {
-  try {
-    console.log('[AUTH] Forgot password request...');
-
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide your email address'
-      });
-    }
-
-    const user = await User.findOne({ email: email.toLowerCase() });
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'No account found with this email'
-      });
-    }
-
-    // Generate reset token
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-
-    // Save hashed token and expiry (30 minutes)
-    user.resetPasswordToken = hashedToken;
-    user.resetPasswordExpiry = Date.now() + 30 * 60 * 1000;
-    await user.save();
-
-    // Create reset URL
-    const resetUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
-
-    // Send email
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: user.email,
-      subject: 'LUXORA - Password Reset Request',
-      html: `
-        <h2>Password Reset Request</h2>
-        <p>You requested to reset your password. Click the link below:</p>
-        <a href="${resetUrl}" style="background-color: #6366f1; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
-          Reset Password
-        </a>
-        <p>Or copy this link: ${resetUrl}</p>
-        <p><strong>This link expires in 30 minutes.</strong></p>
-        <p>If you didn't request this, please ignore this email.</p>
-      `
-    };
-
-    await transporter.sendMail(mailOptions);
-
-    console.log('[AUTH] Password reset email sent to:', email);
-
-    res.json({
-      success: true,
-      message: 'Password reset email sent successfully'
-    });
-
-  } catch (error) {
-    console.error('[AUTH] Forgot password error:', error.message);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to send reset email'
-    });
-  }
-});
-
-// ======= RESET PASSWORD ROUTE =======
-// @route   POST /api/auth/reset-password/:token
-// @desc    Reset password with token
-// @access  Public
-router.post('/reset-password/:token', async (req, res) => {
-  try {
-    console.log('[AUTH] Processing password reset...');
-
-    const { password, confirmPassword } = req.body;
-    const { token } = req.params;
-
-    if (!password || !confirmPassword) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide password and confirm password'
-      });
-    }
-
-    if (password !== confirmPassword) {
-      return res.status(400).json({
-        success: false,
-        message: 'Passwords do not match'
-      });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: 'Password must be at least 6 characters long'
-      });
-    }
-
-    // Hash the token
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-
-    // Find user with valid reset token
-    const user = await User.findOne({
-      resetPasswordToken: hashedToken,
-      resetPasswordExpiry: { $gt: Date.now() }
-    });
-
-    if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid or expired reset token'
-      });
-    }
-
-    // Update password
-    user.password = password;
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpiry = undefined;
-    await user.save();
-
-    console.log('[AUTH] Password reset successful for user:', user._id);
-
-    res.json({
-      success: true,
-      message: 'Password reset successfully'
-    });
-
-  } catch (error) {
-    console.error('[AUTH] Reset password error:', error.message);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to reset password'
-    });
-  }
-});
-
-// ======= CHANGE PASSWORD ROUTE =======
-// @route   POST /api/auth/change-password
-// @desc    Change password for authenticated user
-// @access  Private
-router.post('/change-password', protect, async (req, res) => {
-  try {
-    console.log('[AUTH] Changing password for user:', req.userId);
-
-    const { currentPassword, newPassword, confirmPassword } = req.body;
-
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide all required fields'
-      });
-    }
-
-    if (newPassword !== confirmPassword) {
-      return res.status(400).json({
-        success: false,
-        message: 'New passwords do not match'
-      });
-    }
-
-    if (newPassword.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: 'New password must be at least 6 characters long'
-      });
-    }
-
-    // Get user with password
-    const user = await User.findById(req.userId).select('+password');
-
-    // Verify current password
-    const isCurrentPasswordCorrect = await user.comparePassword(currentPassword);
-
-    if (!isCurrentPasswordCorrect) {
-      return res.status(401).json({
-        success: false,
-        message: 'Current password is incorrect'
-      });
-    }
-
-    // Update password
-    user.password = newPassword;
-    await user.save();
-
-    console.log('[AUTH] Password changed for user:', req.userId);
-
-    res.json({
-      success: true,
-      message: 'Password changed successfully'
-    });
-
-  } catch (error) {
-    console.error('[AUTH] Change password error:', error.message);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to change password'
     });
   }
 });
