@@ -23,14 +23,12 @@ console.log('[SERVER] Allowed CORS Origins:', allowedOrigins);
 
 app.use(cors({
   origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps, Postman)
     if (!origin) return callback(null, true);
-    
     if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
       callback(null, true);
     } else {
       console.warn('[CORS] Blocked origin:', origin);
-      callback(null, true); // Still allow in production, just log
+      callback(null, true);
     }
   },
   credentials: true,
@@ -41,9 +39,8 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// ========== MONGODB CONNECTION (Local Only) ==========
+// ========== MONGODB CONNECTION ==========
 const connectDB = async () => {
-  // Skip if already connected (important for serverless)
   if (mongoose.connection.readyState >= 1) {
     console.log('[DB] Already connected');
     return;
@@ -59,17 +56,14 @@ const connectDB = async () => {
     console.log('✅ MongoDB connected successfully');
   } catch (err) {
     console.error('❌ MongoDB connection error:', err.message);
-    // Don't exit in production (Vercel will retry)
     if (process.env.NODE_ENV !== 'production') {
       process.exit(1);
     }
   }
 };
 
-// Only connect in local development
-if (process.env.NODE_ENV !== 'production') {
-  connectDB();
-}
+// Connect DB immediately for serverless (optional: lazy connection per request)
+connectDB();
 
 // ========== IMPORT ROUTES ==========
 const authRoutes = require('./routes/auth');
@@ -151,37 +145,6 @@ app.use((err, req, res, next) => {
     error: process.env.NODE_ENV === 'development' ? err.stack : undefined
   });
 });
-
-// ========== START SERVER (LOCAL ONLY) ==========
-if (process.env.NODE_ENV !== 'production') {
-  const PORT = process.env.PORT || 5000;
-  
-  const server = app.listen(PORT, () => {
-    console.log(`
-╔════════════════════════════════════════════════════════════╗
-║  🚀 SERVER STARTED SUCCESSFULLY                            ║
-║  🌐 URL: http://localhost:${PORT}                         ║
-║  📦 MongoDB: ${mongoose.connection.readyState === 1 ? '✅ Connected' : '⏳ Connecting'}                           ║
-║  🔒 CORS: Enabled for ${allowedOrigins.length} origins                    ║
-║  📊 Routes: ✅ All active                                  ║
-╚════════════════════════════════════════════════════════════╝
-    `);
-  });
-
-  // Graceful shutdown
-  const shutdown = async (signal) => {
-    console.log(`\n⚠️  ${signal} received, shutting down gracefully...`);
-    server.close(async () => {
-      console.log('✅ Server closed');
-      await mongoose.connection.close();
-      console.log('✅ MongoDB disconnected');
-      process.exit(0);
-    });
-  };
-
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
-}
 
 // ========== EXPORT FOR VERCEL ==========
 module.exports = app;
