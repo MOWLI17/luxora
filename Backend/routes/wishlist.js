@@ -1,21 +1,50 @@
+// routes/wishlist.js - FIXED with Database Connection Checks
 const express = require('express');
 const router = express.Router();
-const Wishlist = require('../models/Wishlist');
-const Product = require('../models/Product');
+const mongoose = require('mongoose');
 const { protect } = require('../middleware/auth');
+
+console.log('[ROUTES] Wishlist routes loaded');
+
+// ✅ Lazy load models
+let Wishlist, Product;
+const getModels = () => {
+  if (!Wishlist) Wishlist = require('../models/Wishlist');
+  if (!Product) Product = require('../models/Product');
+  return { Wishlist, Product };
+};
+
+// ✅ Helper to check DB connection
+const checkDB = (res) => {
+  if (mongoose.connection.readyState !== 1) {
+    res.status(503).json({
+      success: false,
+      message: 'Database service unavailable. Please try again.'
+    });
+    return false;
+  }
+  return true;
+};
 
 // @route   GET /api/wishlist
 // @desc    Get user's wishlist
 // @access  Private
 router.get('/', protect, async (req, res) => {
   try {
-    console.log('[WISHLIST] Getting wishlist for user:', req.user._id);
+    console.log('[WISHLIST] Getting wishlist for user:', req.userId);
     
-    let wishlist = await Wishlist.findOne({ user: req.user._id }).populate('products');
+    if (!checkDB(res)) return;
+
+    const { Wishlist: WishlistModel } = getModels();
+    
+    let wishlist = await WishlistModel.findOne({ user: req.userId })
+      .populate('products')
+      .maxTimeMS(10000)
+      .exec();
 
     if (!wishlist) {
       console.log('[WISHLIST] Wishlist not found, creating new wishlist');
-      wishlist = await Wishlist.create({ user: req.user._id, products: [] });
+      wishlist = await WishlistModel.create({ user: req.userId, products: [] });
     }
 
     res.json({
@@ -38,10 +67,13 @@ router.post('/:productId', protect, async (req, res) => {
   try {
     console.log('[WISHLIST] Toggling product in wishlist:', req.params.productId);
     
+    if (!checkDB(res)) return;
+
     const productId = req.params.productId;
+    const { Wishlist: WishlistModel, Product: ProductModel } = getModels();
 
     // Check if product exists
-    const product = await Product.findById(productId);
+    const product = await ProductModel.findById(productId).maxTimeMS(10000);
     if (!product) {
       return res.status(404).json({
         success: false,
@@ -49,11 +81,11 @@ router.post('/:productId', protect, async (req, res) => {
       });
     }
 
-    let wishlist = await Wishlist.findOne({ user: req.user._id });
+    let wishlist = await WishlistModel.findOne({ user: req.userId }).maxTimeMS(10000);
 
     if (!wishlist) {
-      wishlist = await Wishlist.create({
-        user: req.user._id,
+      wishlist = await WishlistModel.create({
+        user: req.userId,
         products: [productId]
       });
       await wishlist.populate('products');
@@ -111,7 +143,11 @@ router.delete('/:productId', protect, async (req, res) => {
   try {
     console.log('[WISHLIST] Removing product from wishlist:', req.params.productId);
     
-    const wishlist = await Wishlist.findOne({ user: req.user._id });
+    if (!checkDB(res)) return;
+
+    const { Wishlist: WishlistModel } = getModels();
+
+    const wishlist = await WishlistModel.findOne({ user: req.userId }).maxTimeMS(10000);
 
     if (!wishlist) {
       return res.status(404).json({
@@ -155,9 +191,13 @@ router.delete('/:productId', protect, async (req, res) => {
 // @access  Private
 router.delete('/', protect, async (req, res) => {
   try {
-    console.log('[WISHLIST] Clearing wishlist for user:', req.user._id);
+    console.log('[WISHLIST] Clearing wishlist for user:', req.userId);
     
-    const wishlist = await Wishlist.findOne({ user: req.user._id });
+    if (!checkDB(res)) return;
+
+    const { Wishlist: WishlistModel } = getModels();
+
+    const wishlist = await WishlistModel.findOne({ user: req.userId }).maxTimeMS(10000);
 
     if (!wishlist) {
       return res.status(404).json({
