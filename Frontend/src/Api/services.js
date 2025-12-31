@@ -1,7 +1,5 @@
-// src/Api/services.js - UPDATED FOR VERCEL BACKEND
 import axios from 'axios';
 
-// ✅ UPDATED: Use your actual Vercel backend URL
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://luxora-backend-zeta.vercel.app/api';
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -19,10 +17,10 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 15000,
+  timeout: 20000,
 });
 
-// ========== REQUEST INTERCEPTOR ==========
+// ===== REQUEST INTERCEPTOR =====
 api.interceptors.request.use(
   (config) => {
     const userToken = localStorage.getItem('token');
@@ -43,7 +41,7 @@ api.interceptors.request.use(
   }
 );
 
-// ========== RESPONSE INTERCEPTOR ==========
+// ===== RESPONSE INTERCEPTOR =====
 api.interceptors.response.use(
   (response) => {
     logger.debug('Response successful:', response.config.url);
@@ -57,10 +55,9 @@ api.interceptors.response.use(
       message: error.message,
     });
 
-    // Handle different error scenarios
     if (!error.response) {
       if (error.message === 'Network Error') {
-        error.customMessage = '❌ Cannot connect to server. Please check your internet connection.';
+        error.customMessage = '❌ Cannot connect to server. Check internet connection.';
       } else if (error.code === 'ECONNABORTED') {
         error.customMessage = '⏱️ Request took too long. Please try again.';
       } else {
@@ -71,16 +68,12 @@ api.interceptors.response.use(
       localStorage.removeItem('user');
       localStorage.removeItem('sellerToken');
       localStorage.removeItem('seller');
-      error.customMessage = 'Your session has expired. Please login again.';
+      error.customMessage = 'Session expired. Please login again.';
       window.location.href = '/';
     } else if (error.response?.status === 403) {
-      error.customMessage = 'You do not have permission to access this resource.';
+      error.customMessage = 'You do not have permission to access this.';
     } else if (error.response?.status === 404) {
       error.customMessage = error.response.data?.message || 'Resource not found';
-    } else if (error.response?.status === 409) {
-      error.customMessage = error.response.data?.message || 'This resource already exists';
-    } else if (error.response?.status === 400) {
-      error.customMessage = error.response.data?.message || 'Invalid request data';
     } else if (error.response?.status >= 500) {
       error.customMessage = 'Server error. Please try again later.';
     } else {
@@ -91,41 +84,31 @@ api.interceptors.response.use(
   }
 );
 
-// ========== USER AUTH SERVICE ==========
+// ===== USER AUTH =====
 export const authService = {
   register: (data) => {
     logger.debug('Register API call');
     return api.post('/auth/register', data)
       .then(response => {
-        const responseData = response.data;
-        const user = responseData.user || responseData.data?.user;
-        const token = responseData.token || responseData.data?.token;
-        
+        const { user, token } = response.data;
         if (token && user) {
           localStorage.setItem('token', token);
           localStorage.setItem('user', JSON.stringify(user));
         }
-        
-        return { data: { user, token } };
+        return response.data;
       });
   },
   
   login: (emailOrMobile, password) => {
     logger.debug('Login API call');
-    const payload = { emailOrMobile, password };
-    
-    return api.post('/auth/login', payload)
+    return api.post('/auth/login', { emailOrMobile, password })
       .then(response => {
-        const responseData = response.data;
-        const user = responseData.user || responseData.data?.user;
-        const token = responseData.token || responseData.data?.token;
-        
+        const { user, token } = response.data;
         if (token && user) {
           localStorage.setItem('token', token);
           localStorage.setItem('user', JSON.stringify(user));
         }
-        
-        return { data: { user, token } };
+        return response.data;
       });
   },
   
@@ -133,8 +116,7 @@ export const authService = {
     logger.debug('Logout');
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    return api.post('/auth/logout')
-      .catch(() => Promise.resolve());
+    return api.post('/auth/logout').catch(() => Promise.resolve());
   },
   
   getProfile: () => {
@@ -153,45 +135,18 @@ export const authService = {
   }
 };
 
-// ========== USER SERVICE ==========
-export const userService = {
-  getProfile: () => {
-    logger.debug('Fetching user profile');
-    return api.get('/auth/profile');
-  },
-  
-  updateProfile: (data) => {
-    logger.debug('Updating user profile');
-    return api.put('/auth/profile', data);
-  },
-  
-  changePassword: (data) => {
-    logger.debug('Change password');
-    return api.post('/auth/change-password', data);
-  },
-  
-  deleteAccount: () => {
-    logger.debug('Deleting account');
-    return api.delete('/auth/profile');
-  }
-};
-
-// ========== SELLER AUTH SERVICE ==========
+// ===== SELLER AUTH =====
 export const sellerAuthService = {
   register: (data) => {
     logger.debug('Seller registration');
     return api.post('/seller/auth/register', data)
       .then(response => {
-        const responseData = response.data;
-        const seller = responseData.seller;
-        const token = responseData.token;
-        
+        const { seller, token } = response.data;
         if (token && seller) {
           localStorage.setItem('sellerToken', token);
           localStorage.setItem('seller', JSON.stringify(seller));
         }
-        
-        return response;
+        return response.data;
       });
   },
   
@@ -199,16 +154,12 @@ export const sellerAuthService = {
     logger.debug('Seller login');
     return api.post('/seller/auth/login', { email, password })
       .then(response => {
-        const responseData = response.data;
-        const seller = responseData.seller;
-        const token = responseData.token;
-        
+        const { seller, token } = response.data;
         if (token && seller) {
           localStorage.setItem('sellerToken', token);
           localStorage.setItem('seller', JSON.stringify(seller));
         }
-        
-        return response;
+        return response.data;
       });
   },
   
@@ -216,16 +167,11 @@ export const sellerAuthService = {
     logger.debug('Seller logout');
     localStorage.removeItem('sellerToken');
     localStorage.removeItem('seller');
-    return api.post('/seller/auth/logout')
-      .catch(() => Promise.resolve());
+    return api.post('/seller/auth/logout').catch(() => Promise.resolve());
   },
   
   getProfile: () => {
     return api.get('/seller/auth/profile');
-  },
-  
-  updateProfile: (data) => {
-    return api.put('/seller/auth/profile', data);
   },
   
   getProducts: () => {
@@ -234,14 +180,10 @@ export const sellerAuthService = {
   
   getOrders: () => {
     return api.get('/seller/auth/orders');
-  },
-  
-  updateOrderStatus: (orderId, status) => {
-    return api.put(`/seller/auth/orders/${orderId}/status`, { status });
   }
 };
 
-// ========== PRODUCT SERVICE ==========
+// ===== PRODUCTS =====
 export const productService = {
   getAll: (params) => {
     logger.debug('Get all products');
@@ -258,39 +200,13 @@ export const productService = {
     return api.get('/products', { params: { search: query } });
   },
   
-  filterByCategory: (category) => {
-    logger.debug('Filter by category:', category);
-    return api.get('/products', { params: { category } });
-  },
-  
   filterByPrice: (minPrice, maxPrice) => {
     logger.debug('Filter by price:', minPrice, maxPrice);
     return api.get('/products', { params: { minPrice, maxPrice } });
-  },
-  
-  // Seller routes
-  getSellerProducts: () => {
-    return api.get('/products/seller/my-products');
-  },
-  
-  create: (data) => {
-    return api.post('/products', data);
-  },
-  
-  update: (id, data) => {
-    return api.put(`/products/${id}`, data);
-  },
-  
-  delete: (id) => {
-    return api.delete(`/products/${id}`);
-  },
-  
-  addReview: (productId, review) => {
-    return api.post(`/products/${productId}/review`, review);
   }
 };
 
-// ========== CART SERVICE ==========
+// ===== CART =====
 export const cartService = {
   getCart: () => {
     logger.debug('Getting cart');
@@ -299,11 +215,6 @@ export const cartService = {
   
   addToCart: (productId, quantity = 1) => {
     logger.debug('Add to cart:', { productId, quantity });
-    
-    if (!productId) {
-      return Promise.reject(new Error('Product ID is required'));
-    }
-
     return api.post('/cart', {
       productId: String(productId).trim(),
       quantity: parseInt(quantity) || 1
@@ -312,11 +223,6 @@ export const cartService = {
   
   updateCart: (productId, quantity) => {
     logger.debug('Update cart:', { productId, quantity });
-    
-    if (!productId) {
-      return Promise.reject(new Error('Product ID is required'));
-    }
-
     return api.put(`/cart/${productId}`, {
       quantity: parseInt(quantity) || 1
     });
@@ -324,11 +230,6 @@ export const cartService = {
   
   removeFromCart: (productId) => {
     logger.debug('Remove from cart:', productId);
-    
-    if (!productId) {
-      return Promise.reject(new Error('Product ID is required'));
-    }
-
     return api.delete(`/cart/${productId}`);
   },
   
@@ -338,7 +239,7 @@ export const cartService = {
   }
 };
 
-// ========== WISHLIST SERVICE ==========
+// ===== WISHLIST =====
 export const wishlistService = {
   getWishlist: () => {
     return api.get('/wishlist');
@@ -350,19 +251,11 @@ export const wishlistService = {
   
   removeFromWishlist: (productId) => {
     return api.delete(`/wishlist/${productId}`);
-  },
-  
-  clearWishlist: () => {
-    return api.delete('/wishlist');
   }
 };
 
-// ========== ORDER SERVICE ==========
+// ===== ORDERS =====
 export const orderService = {
-  getAll: (status = 'all', limit = 50, page = 1) => {
-    return api.get('/orders', { params: { status, limit, page } });
-  },
-  
   getMyOrders: () => {
     return api.get('/orders');
   },
@@ -371,26 +264,13 @@ export const orderService = {
     return api.get(`/orders/${id}`);
   },
   
-  getStats: () => {
-    return api.get('/orders/user/stats');
-  },
-  
-  // ✅ FIXED: Add create method for checkout
   create: (orderData) => {
     logger.debug('Creating order');
     return api.post('/orders', orderData);
-  },
-  
-  cancel: (id, reason) => {
-    return api.put(`/orders/${id}/cancel`, { cancelReason: reason });
-  },
-  
-  delete: (id) => {
-    return api.delete(`/orders/${id}`);
   }
 };
 
-// ========== PAYMENT SERVICE ==========
+// ===== PAYMENT =====
 export const paymentService = {
   getConfig: () => {
     return api.get('/payment/config');
@@ -398,62 +278,23 @@ export const paymentService = {
   
   createPaymentIntent: (amount, currency = 'inr') => {
     return api.post('/payment/create-payment-intent', { amount, currency });
-  },
-  
-  createOrder: (orderData) => {
-    return api.post('/payment/create-order', orderData);
-  },
-  
-  confirmPayment: (orderId, paymentIntentId) => {
-    return api.post('/payment/confirm-payment', { orderId, paymentIntentId });
   }
 };
 
-// ========== PASSWORD SERVICE ==========
-export const passwordService = {
-  forgot: (email) => {
-    return api.post('/password/forgot', { email });
-  },
-  
-  reset: (token, newPassword, confirmPassword) => {
-    return api.post(`/password/reset/${token}`, { newPassword, confirmPassword });
-  },
-  
-  change: (data) => {
-    return api.post('/password/change', data);
-  }
-};
-
-// ========== HELPER FUNCTIONS ==========
+// ===== HELPERS =====
 export const getErrorMessage = (error) => {
-  if (error.customMessage) {
-    return error.customMessage;
-  }
-
-  if (error.response?.data?.message) {
-    return error.response.data.message;
-  }
-
-  if (error.response?.data?.errors) {
-    return error.response.data.errors[0] || 'An error occurred';
-  }
-
-  return error.message || 'An error occurred. Please try again.';
+  if (error.customMessage) return error.customMessage;
+  if (error.response?.data?.message) return error.response.data.message;
+  if (error.response?.data?.errors) return error.response.data.errors[0];
+  return error.message || 'An error occurred';
 };
 
-export const isUserLoggedIn = () => {
-  return !!localStorage.getItem('token');
-};
-
-export const isSellerLoggedIn = () => {
-  return !!localStorage.getItem('sellerToken');
-};
-
+export const isUserLoggedIn = () => !!localStorage.getItem('token');
+export const isSellerLoggedIn = () => !!localStorage.getItem('sellerToken');
 export const getCurrentUser = () => {
   const user = localStorage.getItem('user');
   return user ? JSON.parse(user) : null;
 };
-
 export const getCurrentSeller = () => {
   const seller = localStorage.getItem('seller');
   return seller ? JSON.parse(seller) : null;
