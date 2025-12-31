@@ -1,46 +1,59 @@
-// test-db.js - Run this locally to test MongoDB connection
-require('dotenv').config();
+// test-connection.js - Test MongoDB Connection
 const mongoose = require('mongoose');
 
-const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_URI = 'mongodb+srv://Ecom:Mowli12%40@ecom.pbem7rb.mongodb.net/luxora?retryWrites=true&w=majority&authSource=admin';
 
-console.log('Testing MongoDB Connection...');
-console.log('URI exists:', !!MONGODB_URI);
-console.log('URI starts with:', MONGODB_URI ? MONGODB_URI.substring(0, 20) + '...' : 'N/A');
+console.log('🔄 Testing MongoDB connection...');
+console.log('URI:', MONGODB_URI.replace(/:[^:]*@/, ':****@')); // Hide password
 
 async function testConnection() {
   try {
-    console.log('\n🔄 Attempting to connect...');
+    console.log('\n⏳ Connecting...');
     
     await mongoose.connect(MONGODB_URI, {
       serverSelectionTimeoutMS: 10000,
-      socketTimeoutMS: 45000
+      socketTimeoutMS: 30000
     });
 
-    console.log('✅ Successfully connected to MongoDB!');
-    console.log('📊 Connection details:');
-    console.log('  - Host:', mongoose.connection.host);
-    console.log('  - Database:', mongoose.connection.name);
-    console.log('  - Ready State:', mongoose.connection.readyState);
+    console.log('✅ Connection successful!');
+    console.log('📊 Database:', mongoose.connection.name);
+    console.log('🖥️  Host:', mongoose.connection.host);
+    console.log('📈 Ready State:', mongoose.connection.readyState);
 
-    // Test Product model
-    console.log('\n🔍 Testing Product model...');
-    const Product = require('./models/Product');
-    
+    // Test querying products
+    console.log('\n🔍 Testing Product collection...');
+    const Product = mongoose.model('Product', new mongoose.Schema({
+      name: String,
+      price: Number
+    }));
+
     const count = await Product.countDocuments();
-    console.log('✅ Product count:', count);
+    console.log('📦 Total products:', count);
 
     if (count > 0) {
       const sample = await Product.findOne().lean();
-      console.log('📦 Sample product:', sample ? sample.name : 'None');
+      console.log('✨ Sample product:', {
+        name: sample.name,
+        price: sample.price
+      });
+    } else {
+      console.log('⚠️  No products found in database');
     }
 
     console.log('\n✅ All tests passed!');
-    
+
   } catch (error) {
     console.error('\n❌ Connection failed!');
     console.error('Error:', error.message);
-    console.error('Stack:', error.stack);
+    
+    if (error.message.includes('authentication')) {
+      console.error('\n💡 Authentication issue - check username/password');
+    } else if (error.message.includes('ENOTFOUND')) {
+      console.error('\n💡 DNS issue - check cluster URL');
+    } else if (error.message.includes('timeout')) {
+      console.error('\n💡 Timeout - check network/firewall');
+    }
+    
   } finally {
     await mongoose.connection.close();
     console.log('\n🔌 Connection closed');
