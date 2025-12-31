@@ -1,177 +1,229 @@
-// api/index.js - Vercel Serverless Entry Point (FIXED)
+// api/index.js - Bulletproof Vercel Entry Point
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-require('dotenv').config();
+
+// Load environment variables
+if (process.env.NODE_ENV !== 'production') {
+  require('dotenv').config();
+}
 
 const app = express();
 
-console.log('[API] Initializing Vercel serverless function...');
+console.log('[SERVER] Starting Luxora API...');
+console.log('[SERVER] Environment:', process.env.NODE_ENV);
+console.log('[SERVER] MongoDB URI exists:', !!process.env.MONGODB_URI);
 
 // ========================================
 // MIDDLEWARE
 // ========================================
 app.use(cors({
-  origin: true, // Allow all origins for now
+  origin: true,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
 }));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Request logging
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-  next();
-});
-
 // ========================================
-// DATABASE CONNECTION (SINGLETON)
+// DATABASE CONNECTION (CACHED)
 // ========================================
-let cachedDb = null;
+let cachedConnection = null;
 
-const connectDB = async () => {
-  if (cachedDb && mongoose.connection.readyState === 1) {
-    console.log('[DB] ✅ Using cached database connection');
-    return cachedDb;
+async function connectToDatabase() {
+  if (cachedConnection && mongoose.connection.readyState === 1) {
+    console.log('[DB] Using existing connection');
+    return cachedConnection;
   }
 
   try {
-    console.log('[DB] Creating new database connection...');
-    
     if (!process.env.MONGODB_URI) {
-      throw new Error('MONGODB_URI is not defined');
+      throw new Error('MONGODB_URI environment variable is not set');
     }
 
-    const opts = {
+    console.log('[DB] Connecting to MongoDB...');
+
+    const connection = await mongoose.connect(process.env.MONGODB_URI, {
       bufferCommands: false,
       serverSelectionTimeoutMS: 10000,
-      socketTimeoutMS: 45000,
-      maxPoolSize: 10
-    };
+      socketTimeoutMS: 30000,
+    });
 
-    cachedDb = await mongoose.connect(process.env.MONGODB_URI, opts);
-    console.log('[DB] ✅ MongoDB Connected');
-    return cachedDb;
-    
+    cachedConnection = connection;
+    console.log('[DB] ✅ Connected to:', connection.connection.name);
+    return connection;
+
   } catch (error) {
-    console.error('[DB] ❌ Connection Error:', error.message);
-    cachedDb = null;
+    console.error('[DB] ❌ Connection failed:', error.message);
+    cachedConnection = null;
     throw error;
   }
-};
+}
 
 // ========================================
-// ROUTES WITH DB CONNECTION WRAPPER
+// TEST/HEALTH ROUTES
 // ========================================
 
-// Health check
+app.get('/api', (req, res) => {
+  res.json({
+    message: 'Luxora API is running',
+    timestamp: new Date().toISOString(),
+    status: 'ok'
+  });
+});
+
 app.get('/api/health', async (req, res) => {
   try {
-    await connectDB();
+    await connectToDatabase();
+    
     res.json({
-      status: 'ok',
-      database: 'connected',
+      status: 'healthy',
+      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      dbState: mongoose.connection.readyState,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
     res.status(503).json({
-      status: 'error',
+      status: 'unhealthy',
       database: 'disconnected',
-      message: error.message
+      error: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// Root route
-app.get('/api', (req, res) => {
-  res.json({
-    message: 'Luxora API',
-    version: '1.0.0'
-  });
-});
+// ========================================
+// MAIN ROUTES WITH SAFE LOADING
+// ========================================
 
-// Products routes
-const productsRouter = require('../routes/products');
+// Products route
 app.use('/api/products', async (req, res, next) => {
   try {
-    await connectDB();
-    next();
-  } catch (error) {
-    console.error('[API] DB Connection failed for /products');
+    console.log('[ROUTE] /api/products called');
+    await connectToDatabase();
+    
+    // Safely load the products router
+    try {
+      const productsRouter = require('../routes/products');
+      productsRouter(req, res, next);
+    } catch (err) {
+      console.error('[ROUTE] Error loading products router:', err.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Products route failed to load',
+        error: err.message
+      });
+    }
+  } catch (dbError) {
+    console.error('[ROUTE] DB connection failed:', dbError.message);
     return res.status(503).json({
       success: false,
       message: 'Database connection failed',
-      error: error.message
+      error: dbError.message
     });
   }
-}, productsRouter);
+});
 
-// Auth routes
-const authRouter = require('../routes/auth');
+// Auth route (with fallback if file doesn't exist)
 app.use('/api/auth', async (req, res, next) => {
   try {
-    await connectDB();
-    next();
-  } catch (error) {
+    await connectToDatabase();
+    try {
+      const authRouter = require('../routes/auth');
+      authRouter(req, res, next);
+    } catch (err) {
+      console.error('[ROUTE] Auth route not found:', err.message);
+      return res.status(501).json({
+        success: false,
+        message: 'Auth endpoint not implemented yet'
+      });
+    }
+  } catch (dbError) {
     return res.status(503).json({ success: false, message: 'Database connection failed' });
   }
-}, authRouter);
+});
 
-// User routes
-const userRouter = require('../routes/users');
+// Users route (with fallback)
 app.use('/api/users', async (req, res, next) => {
   try {
-    await connectDB();
-    next();
-  } catch (error) {
+    await connectToDatabase();
+    try {
+      const usersRouter = require('../routes/users');
+      usersRouter(req, res, next);
+    } catch (err) {
+      console.error('[ROUTE] Users route not found:', err.message);
+      return res.status(501).json({
+        success: false,
+        message: 'Users endpoint not implemented yet'
+      });
+    }
+  } catch (dbError) {
     return res.status(503).json({ success: false, message: 'Database connection failed' });
   }
-}, userRouter);
+});
 
-// Order routes
-const orderRouter = require('../routes/orders');
+// Orders route (with fallback)
 app.use('/api/orders', async (req, res, next) => {
   try {
-    await connectDB();
-    next();
-  } catch (error) {
+    await connectToDatabase();
+    try {
+      const ordersRouter = require('../routes/orders');
+      ordersRouter(req, res, next);
+    } catch (err) {
+      console.error('[ROUTE] Orders route not found:', err.message);
+      return res.status(501).json({
+        success: false,
+        message: 'Orders endpoint not implemented yet'
+      });
+    }
+  } catch (dbError) {
     return res.status(503).json({ success: false, message: 'Database connection failed' });
   }
-}, orderRouter);
+});
 
-// Seller routes
-const sellerRouter = require('../routes/sellers');
+// Sellers route (with fallback)
 app.use('/api/sellers', async (req, res, next) => {
   try {
-    await connectDB();
-    next();
-  } catch (error) {
+    await connectToDatabase();
+    try {
+      const sellersRouter = require('../routes/sellers');
+      sellersRouter(req, res, next);
+    } catch (err) {
+      console.error('[ROUTE] Sellers route not found:', err.message);
+      return res.status(501).json({
+        success: false,
+        message: 'Sellers endpoint not implemented yet'
+      });
+    }
+  } catch (dbError) {
     return res.status(503).json({ success: false, message: 'Database connection failed' });
   }
-}, sellerRouter);
+});
 
 // ========================================
-// ERROR HANDLING
+// ERROR HANDLERS
 // ========================================
 
 // 404 handler
 app.use((req, res) => {
+  console.log('[404] Route not found:', req.method, req.path);
   res.status(404).json({
     success: false,
-    message: 'Route not found',
-    path: req.path
+    message: 'Endpoint not found',
+    path: req.path,
+    method: req.method
   });
 });
 
 // Global error handler
 app.use((err, req, res, next) => {
-  console.error('[ERROR]', err.message);
+  console.error('[ERROR] Global handler:', err.message);
+  console.error('[ERROR] Stack:', err.stack);
+
   res.status(err.status || 500).json({
     success: false,
-    message: err.message || 'Server error',
+    message: err.message || 'Internal server error',
     error: process.env.NODE_ENV === 'development' ? err.stack : undefined
   });
 });
