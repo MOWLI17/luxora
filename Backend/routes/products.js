@@ -1,93 +1,110 @@
-// routes/products.js - FIXED with Database Connection Checks
+// routes/products.js - Minimal Working Version
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 
-console.log('[ROUTES] Products routes loaded');
+console.log('[PRODUCTS-ROUTE] Products route loaded');
 
-// ✅ Lazy load models to ensure DB is connected first
-let Product;
-const getProduct = () => {
-  if (!Product) {
-    Product = require('../models/Product');
+// Get Product model safely
+function getProductModel() {
+  try {
+    // Check if model already exists
+    if (mongoose.models.Product) {
+      return mongoose.models.Product;
+    }
+    // Otherwise require it
+    return require('../models/Product');
+  } catch (error) {
+    console.error('[PRODUCTS-ROUTE] Error loading Product model:', error.message);
+    throw error;
   }
-  return Product;
-};
+}
 
 /* ========================
    GET ALL PRODUCTS
 ======================== */
 router.get('/', async (req, res) => {
+  console.log('[PRODUCTS] GET / - Fetching all products');
+  
   try {
-    console.log('[PRODUCTS] GET / - Fetching products');
-    console.log('[PRODUCTS] DB Connection State:', mongoose.connection.readyState);
-    
-    // ✅ Check if database is connected FIRST
+    // Check database connection
     if (mongoose.connection.readyState !== 1) {
-      console.error('[PRODUCTS] ❌ Database not connected. State:', mongoose.connection.readyState);
+      console.error('[PRODUCTS] Database not connected. State:', mongoose.connection.readyState);
       return res.status(503).json({
         success: false,
-        message: 'Database connection failed. Please try again.',
+        message: 'Database is not connected',
         dbState: mongoose.connection.readyState
       });
     }
 
-    // Get the Product model
-    const ProductModel = getProduct();
+    console.log('[PRODUCTS] Database connected. Loading model...');
+    const Product = getProductModel();
 
-    // Extract query parameters
-    const { 
-      minPrice = 0, 
-      maxPrice = 5000, 
-      minRating = 0, 
+    // Extract query parameters with defaults
+    const {
+      minPrice = 0,
+      maxPrice = 10000,
+      minRating = 0,
       search = '',
       page = 1,
       limit = 20,
-      category = '',
-      sort = '-createdAt'
+      category = ''
     } = req.query;
 
-    // Build filter object
-    let filter = {
-      price: { $gte: parseInt(minPrice), $lte: parseInt(maxPrice) },
-      rating: { $gte: parseInt(minRating) }
+    // Build filter
+    const filter = {
+      price: { 
+        $gte: Number(minPrice) || 0, 
+        $lte: Number(maxPrice) || 10000 
+      }
     };
+
+    // Add rating filter if provided
+    if (minRating && Number(minRating) > 0) {
+      filter.rating = { $gte: Number(minRating) };
+    }
 
     // Add search filter
     if (search && search.trim()) {
       filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
+        { name: { $regex: search.trim(), $options: 'i' } },
+        { description: { $regex: search.trim(), $options: 'i' } }
       ];
     }
 
     // Add category filter
     if (category && category.trim()) {
-      filter.category = category;
+      filter.category = category.trim();
     }
 
     console.log('[PRODUCTS] Filter:', JSON.stringify(filter));
 
     // Calculate pagination
-    const pageNum = parseInt(page) || 1;
-    const limitNum = parseInt(limit) || 20;
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
 
-    // ✅ Execute query with timeout
-    const products = await ProductModel.find(filter)
-      .sort(sort)
+    console.log('[PRODUCTS] Executing query...');
+
+    // Execute query with timeout
+    const products = await Product.find(filter)
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum)
       .maxTimeMS(15000)
       .lean()
       .exec();
 
-    // Get total count
-    const total = await ProductModel.countDocuments(filter).maxTimeMS(10000);
-
     console.log('[PRODUCTS] ✅ Found', products.length, 'products');
 
-    res.json({
+    // Get total count (with timeout)
+    const total = await Product.countDocuments(filter)
+      .maxTimeMS(10000)
+      .exec();
+
+    console.log('[PRODUCTS] Total count:', total);
+
+    return res.json({
       success: true,
       products,
       pagination: {
@@ -99,13 +116,14 @@ router.get('/', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('[PRODUCTS] ❌ Error fetching products:', error.message);
+    console.error('[PRODUCTS] ❌ Error:', error.message);
     console.error('[PRODUCTS] Stack:', error.stack);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: 'Error fetching products',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Failed to fetch products',
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -114,28 +132,28 @@ router.get('/', async (req, res) => {
    GET SINGLE PRODUCT
 ======================== */
 router.get('/:id', async (req, res) => {
-  try {
-    console.log('[PRODUCTS] GET /:id - Fetching product:', req.params.id);
+  console.log('[PRODUCTS] GET /:id -', req.params.id);
 
-    // ✅ Check database connection
+  try {
+    // Check database
     if (mongoose.connection.readyState !== 1) {
       return res.status(503).json({
         success: false,
-        message: 'Database connection failed'
+        message: 'Database not connected'
       });
     }
 
-    const ProductModel = getProduct();
+    const Product = getProductModel();
 
-    // Validate MongoDB ObjectId
+    // Validate ID
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid product ID'
+        message: 'Invalid product ID format'
       });
     }
 
-    const product = await ProductModel.findById(req.params.id)
+    const product = await Product.findById(req.params.id)
       .maxTimeMS(10000)
       .lean()
       .exec();
@@ -147,20 +165,20 @@ router.get('/:id', async (req, res) => {
       });
     }
 
-    console.log('[PRODUCTS] ✅ Found product:', product._id);
+    console.log('[PRODUCTS] ✅ Found product');
 
-    res.json({
+    return res.json({
       success: true,
       product
     });
 
   } catch (error) {
-    console.error('[PRODUCTS] ❌ Error fetching product:', error.message);
+    console.error('[PRODUCTS] ❌ Error:', error.message);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: 'Error fetching product',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Failed to fetch product',
+      error: error.message
     });
   }
 });
@@ -169,30 +187,32 @@ router.get('/:id', async (req, res) => {
    SEARCH PRODUCTS
 ======================== */
 router.get('/search/q', async (req, res) => {
+  console.log('[PRODUCTS] Search query:', req.query.q);
+
   try {
     const { q } = req.query;
 
-    if (!q) {
+    if (!q || !q.trim()) {
       return res.status(400).json({
         success: false,
-        message: 'Search query required'
+        message: 'Search query is required'
       });
     }
 
-    // ✅ Check database connection
     if (mongoose.connection.readyState !== 1) {
       return res.status(503).json({
         success: false,
-        message: 'Database connection failed'
+        message: 'Database not connected'
       });
     }
 
-    const ProductModel = getProduct();
+    const Product = getProductModel();
 
-    const products = await ProductModel.find({
+    const products = await Product.find({
       $or: [
-        { name: { $regex: q, $options: 'i' } },
-        { description: { $regex: q, $options: 'i' } }
+        { name: { $regex: q.trim(), $options: 'i' } },
+        { description: { $regex: q.trim(), $options: 'i' } },
+        { brand: { $regex: q.trim(), $options: 'i' } }
       ]
     })
       .limit(20)
@@ -202,7 +222,7 @@ router.get('/search/q', async (req, res) => {
 
     console.log('[PRODUCTS] ✅ Search found', products.length, 'results');
 
-    res.json({
+    return res.json({
       success: true,
       products,
       count: products.length
@@ -211,10 +231,10 @@ router.get('/search/q', async (req, res) => {
   } catch (error) {
     console.error('[PRODUCTS] ❌ Search error:', error.message);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Search failed',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: error.message
     });
   }
 });
