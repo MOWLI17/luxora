@@ -1,5 +1,40 @@
 // server.js - Main Entry Point (Local + Vercel Safe)
 
+console.log('\n========== ENVIRONMENT VARIABLES DIAGNOSTIC ==========');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('MONGODB_URI exists:', !!process.env.MONGODB_URI);
+console.log('MONGODB_URI length:', process.env.MONGODB_URI?.length || 0);
+console.log('FRONTEND_URL:', process.env.FRONTEND_URL);
+console.log('CLIENT_URL:', process.env.CLIENT_URL);
+console.log('======================================================\n');
+
+// Also add this route for debugging - PUT IT AFTER HEALTH CHECK ROUTE
+
+app.get('/api/debug', (req, res) => {
+  const dbStatus = mongoose.connection.readyState;
+  const statusText = {
+    0: 'Disconnected',
+    1: 'Connected',
+    2: 'Connecting',
+    3: 'Disconnecting'
+  };
+
+  res.json({
+    success: true,
+    debug: {
+      nodeEnv: process.env.NODE_ENV,
+      mongodbUriExists: !!process.env.MONGODB_URI,
+      mongodbUriFirstChars: process.env.MONGODB_URI?.substring(0, 30) + '...',
+      mongoConnectionState: statusText[dbStatus],
+      mongoConnectionStateCode: dbStatus,
+      mongoHost: mongoose.connection.host || 'Not connected',
+      mongoDatabase: mongoose.connection.name || 'Not connected',
+      frontendUrl: process.env.FRONTEND_URL,
+      clientUrl: process.env.CLIENT_URL,
+      timestamp: new Date().toISOString()
+    }
+  });
+});
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -157,3 +192,4 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 module.exports = app;
+
