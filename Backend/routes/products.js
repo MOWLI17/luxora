@@ -1,150 +1,110 @@
-// routes/products.js - Products API Routes
 const express = require('express');
 const router = express.Router();
-const mongoose = require('mongoose');
-const Product = require('../models/Product');
+const Product = require('../models/products');
 
-console.log('[PRODUCTS ROUTE] Products routes loaded');
-
-/* ========================
-   GET ALL PRODUCTS
-======================== */
+// ===== GET ALL PRODUCTS WITH FILTERS =====
 router.get('/', async (req, res) => {
   try {
-    console.log('[PRODUCTS] GET / - Fetching products');
-    console.log('[PRODUCTS] Query params:', req.query);
-    console.log('[PRODUCTS] DB State:', mongoose.connection.readyState);
+    console.log('[PRODUCTS] GET / - Query params:', req.query);
     
-    // Check database connection
-    if (mongoose.connection.readyState !== 1) {
-      console.error('[PRODUCTS] ❌ Database not connected');
-      return res.status(503).json({
-        success: false,
-        message: 'Database not connected',
-        products: []
-      });
-    }
-
-    // Extract query parameters with defaults
-    const {
-      minPrice = 0,
-      maxPrice = 10000,
+    const { 
+      search = '', 
+      category = '', 
+      minPrice = 0, 
+      maxPrice = 999999,
       minRating = 0,
-      search = '',
+      sort = '-createdAt',
       page = 1,
-      limit = 20,
-      category = '',
-      sort = '-createdAt'
+      limit = 12
     } = req.query;
 
     // Build filter object
     const filter = {
-      price: {
-        $gte: Number(minPrice) || 0,
-        $lte: Number(maxPrice) || 10000
-      }
+      stock: { $gt: 0 } // Only show in-stock products
     };
 
-    // Add rating filter
-    if (minRating && Number(minRating) > 0) {
-      filter.rating = { $gte: Number(minRating) };
-    }
-
-    // Add search filter
+    // Search filter
     if (search && search.trim()) {
       filter.$or = [
-        { name: { $regex: search.trim(), $options: 'i' } },
-        { description: { $regex: search.trim(), $options: 'i' } },
-        { brand: { $regex: search.trim(), $options: 'i' } }
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { brand: { $regex: search, $options: 'i' } }
       ];
     }
 
-    // Add category filter
+    // Category filter
     if (category && category.trim()) {
-      filter.category = category.trim();
+      filter.category = { $regex: category, $options: 'i' };
     }
 
-    console.log('[PRODUCTS] Filter:', JSON.stringify(filter));
+    // Price filter
+    if (minPrice || maxPrice) {
+      filter.price = {};
+      if (minPrice) filter.price.$gte = Number(minPrice);
+      if (maxPrice) filter.price.$lte = Number(maxPrice);
+    }
 
-    // Calculate pagination
-    const pageNum = Math.max(1, Number(page) || 1);
-    const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
+    // Rating filter
+    if (minRating) {
+      filter.rating = { $gte: Number(minRating) };
+    }
+
+    // Pagination
+    const pageNum = Math.max(1, Number(page));
+    const limitNum = Math.max(1, Number(limit));
     const skip = (pageNum - 1) * limitNum;
 
-    console.log('[PRODUCTS] Pagination:', { page: pageNum, limit: limitNum, skip });
+    console.log('[PRODUCTS] Filters:', filter);
 
-    // Execute query
+    // Fetch products with sort and pagination
     const products = await Product.find(filter)
       .sort(sort)
       .skip(skip)
       .limit(limitNum)
-      .maxTimeMS(20000)
-      .lean()
       .exec();
 
-    console.log('[PRODUCTS] ✅ Found', products.length, 'products');
+    const total = await Product.countDocuments(filter);
 
-    // Get total count
-    let total = 0;
-    try {
-      total = await Product.countDocuments(filter).maxTimeMS(10000).exec();
-      console.log('[PRODUCTS] Total count:', total);
-    } catch (countErr) {
-      console.error('[PRODUCTS] Count error:', countErr.message);
-      total = products.length;
-    }
+    console.log(`[PRODUCTS] Found ${products.length} products (Total: ${total})`);
 
-    return res.json({
+    res.status(200).json({
       success: true,
-      products,
+      data: products,
       pagination: {
         total,
         page: pageNum,
-        pages: Math.ceil(total / limitNum),
-        limit: limitNum
+        limit: limitNum,
+        pages: Math.ceil(total / limitNum)
       }
     });
 
   } catch (error) {
-    console.error('[PRODUCTS] ❌ Error:', error.message);
-    console.error('[PRODUCTS] Stack:', error.stack);
-
-    return res.status(500).json({
+    console.error('[PRODUCTS] Error in GET /:', error.message);
+    console.error(error.stack);
+    
+    res.status(500).json({
       success: false,
       message: 'Error fetching products',
-      error: error.message,
-      products: []
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal Server Error'
     });
   }
 });
 
-/* ========================
-   GET SINGLE PRODUCT
-======================== */
+// ===== GET SINGLE PRODUCT BY ID =====
 router.get('/:id', async (req, res) => {
   try {
-    console.log('[PRODUCTS] GET /:id -', req.params.id);
+    const { id } = req.params;
+    console.log('[PRODUCTS] GET /:id - ID:', id);
 
-    // Check database
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: 'Database not connected'
-      });
-    }
-
-    // Validate ID
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    // Check if valid MongoDB ID
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid product ID'
+        message: 'Invalid product ID format'
       });
     }
 
-    const product = await Product.findById(req.params.id)
-      .maxTimeMS(10000)
-      .lean()
-      .exec();
+    const product = await Product.findById(id).populate('reviews.user', 'name email');
 
     if (!product) {
       return res.status(404).json({
@@ -153,73 +113,148 @@ router.get('/:id', async (req, res) => {
       });
     }
 
-    console.log('[PRODUCTS] ✅ Product found');
-
-    return res.json({
+    console.log('[PRODUCTS] Product found:', product.name);
+    res.status(200).json({
       success: true,
-      product
+      data: product
     });
 
   } catch (error) {
-    console.error('[PRODUCTS] ❌ Error:', error.message);
-
-    return res.status(500).json({
+    console.error('[PRODUCTS] Error in GET /:id:', error.message);
+    
+    res.status(500).json({
       success: false,
       message: 'Error fetching product',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal Server Error'
     });
   }
 });
 
-/* ========================
-   SEARCH PRODUCTS
-======================== */
-router.get('/search/q', async (req, res) => {
+// ===== CREATE PRODUCT (Admin/Seller) =====
+router.post('/', async (req, res) => {
   try {
-    const { q } = req.query;
-    console.log('[PRODUCTS] Search query:', q);
+    console.log('[PRODUCTS] POST / - Creating new product');
+    const { name, description, price, originalPrice, category, images, stock, brand, rating } = req.body;
 
-    if (!q || !q.trim()) {
+    // Validation
+    if (!name || !description || !price || !originalPrice || !category || !brand) {
       return res.status(400).json({
         success: false,
-        message: 'Search query required'
+        message: 'Missing required fields: name, description, price, originalPrice, category, brand'
       });
     }
 
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        success: false,
-        message: 'Database not connected'
-      });
-    }
+    const product = new Product({
+      name,
+      description,
+      price: Number(price),
+      originalPrice: Number(originalPrice),
+      category,
+      images: images || ['https://via.placeholder.com/400'],
+      stock: Number(stock) || 0,
+      brand,
+      rating: Number(rating) || 0
+    });
 
-    const products = await Product.find({
-      $or: [
-        { name: { $regex: q.trim(), $options: 'i' } },
-        { description: { $regex: q.trim(), $options: 'i' } },
-        { brand: { $regex: q.trim(), $options: 'i' } }
-      ]
-    })
-      .limit(20)
-      .maxTimeMS(10000)
-      .lean()
-      .exec();
+    const savedProduct = await product.save();
+    console.log('[PRODUCTS] Product created:', savedProduct._id);
 
-    console.log('[PRODUCTS] ✅ Search found', products.length, 'results');
-
-    return res.json({
+    res.status(201).json({
       success: true,
-      products,
-      count: products.length
+      message: 'Product created successfully',
+      data: savedProduct
     });
 
   } catch (error) {
-    console.error('[PRODUCTS] ❌ Search error:', error.message);
-
-    return res.status(500).json({
+    console.error('[PRODUCTS] Error in POST /:', error.message);
+    
+    res.status(500).json({
       success: false,
-      message: 'Search failed',
-      error: error.message
+      message: 'Error creating product',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal Server Error'
+    });
+  }
+});
+
+// ===== UPDATE PRODUCT =====
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log('[PRODUCTS] PUT /:id - Updating product:', id);
+
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid product ID format'
+      });
+    }
+
+    const updatedProduct = await Product.findByIdAndUpdate(
+      id,
+      { ...req.body, updatedAt: new Date() },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedProduct) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    console.log('[PRODUCTS] Product updated:', id);
+    res.status(200).json({
+      success: true,
+      message: 'Product updated successfully',
+      data: updatedProduct
+    });
+
+  } catch (error) {
+    console.error('[PRODUCTS] Error in PUT /:id:', error.message);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Error updating product',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal Server Error'
+    });
+  }
+});
+
+// ===== DELETE PRODUCT =====
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log('[PRODUCTS] DELETE /:id - Deleting product:', id);
+
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid product ID format'
+      });
+    }
+
+    const deletedProduct = await Product.findByIdAndDelete(id);
+
+    if (!deletedProduct) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    console.log('[PRODUCTS] Product deleted:', id);
+    res.status(200).json({
+      success: true,
+      message: 'Product deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('[PRODUCTS] Error in DELETE /:id:', error.message);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Error deleting product',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal Server Error'
     });
   }
 });
