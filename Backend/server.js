@@ -1,4 +1,5 @@
-// server.js - Main Entry Point
+// server.js - Main Entry Point (Local + Vercel Safe)
+
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -6,7 +7,9 @@ const cors = require('cors');
 
 const app = express();
 
-// CORS Configuration
+/* ============================
+   CORS CONFIGURATION
+============================ */
 app.use(cors({
   origin: [
     'http://localhost:3000',
@@ -14,108 +17,143 @@ app.use(cors({
     'https://luxora-h8qumwleu-mowli17s-projects.vercel.app'
   ],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Logging Middleware
+/* ============================
+   REQUEST LOGGING
+============================ */
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
   next();
 });
 
-// MongoDB Connection
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://Ecom:Mowli12%40@ecom.pbem7rb.mongodb.net/luxora?retryWrites=true&w=majority&authSource=admin';
+/* ============================
+   MONGODB CONNECTION (CACHED)
+============================ */
+let cachedConnection = null;
 
-mongoose.connect(MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
-.then(() => {
-  console.log('✅ MongoDB Connected Successfully');
-  console.log('📦 Database:', mongoose.connection.name);
-})
-.catch((err) => {
-  console.error('❌ MongoDB Connection Error:', err.message);
-  process.exit(1);
-});
+async function connectDB() {
+  if (cachedConnection) return cachedConnection;
 
-// Health Check
-app.get('/', (req, res) => {
-  res.json({
-    success: true,
-    message: 'LUXORA API Server Running',
-    timestamp: new Date().toISOString(),
-    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
+  if (!process.env.MONGODB_URI) {
+    throw new Error('❌ MONGODB_URI is not defined');
+  }
+
+  cachedConnection = await mongoose.connect(process.env.MONGODB_URI, {
+    serverSelectionTimeoutMS: 15000
   });
+
+  console.log('✅ MongoDB Connected');
+  console.log('📦 Database:', mongoose.connection.name);
+
+  return cachedConnection;
+}
+
+/* ============================
+   HEALTH ROUTES
+============================ */
+app.get('/', async (req, res) => {
+  try {
+    await connectDB();
+    res.json({
+      success: true,
+      message: 'LUXORA API Server Running',
+      database: 'Connected',
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
 });
 
 app.get('/api', (req, res) => {
   res.json({
     success: true,
-    message: 'API is working!',
+    message: 'API is working',
     timestamp: new Date().toISOString()
   });
 });
 
-app.get('/api/health', (req, res) => {
-  res.json({
-    success: true,
-    status: 'ok',
-    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
-    timestamp: new Date().toISOString()
-  });
+app.get('/api/health', async (req, res) => {
+  try {
+    await connectDB();
+    res.json({
+      success: true,
+      status: 'ok',
+      database: 'Connected',
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      database: 'Disconnected',
+      error: err.message
+    });
+  }
 });
 
-// Import Routes
-const authRoutes = require('./routes/auth');
-const productRoutes = require('./routes/products');
-const sellerAuthRoutes = require('./routes/sellerAuth');
-const sellerProductRoutes = require('./routes/sellerProducts');
-const cartRoutes = require('./routes/cart');
-const wishlistRoutes = require('./routes/wishlist');
-const orderRoutes = require('./routes/orders');
-const paymentRoutes = require('./routes/payment');
+/* ============================
+   CONNECT DB BEFORE ROUTES
+============================ */
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
-// Mount Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/products', productRoutes);
-app.use('/api/seller/auth', sellerAuthRoutes);
-app.use('/api/seller/auth/products', sellerProductRoutes);
-app.use('/api/cart', cartRoutes);
-app.use('/api/wishlist', wishlistRoutes);
-app.use('/api/orders', orderRoutes);
-app.use('/api/payment', paymentRoutes);
+/* ============================
+   ROUTES
+============================ */
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/products', require('./routes/products'));
+app.use('/api/seller/auth', require('./routes/sellerAuth'));
+app.use('/api/seller/auth/products', require('./routes/sellerProducts'));
+app.use('/api/cart', require('./routes/cart'));
+app.use('/api/wishlist', require('./routes/wishlist'));
+app.use('/api/orders', require('./routes/orders'));
+app.use('/api/payment', require('./routes/payment'));
 
-// 404 Handler
+/* ============================
+   404 HANDLER
+============================ */
 app.use((req, res) => {
-  console.log('❌ 404 Not Found:', req.method, req.url);
   res.status(404).json({
     success: false,
     message: 'Route not found',
-    path: req.url
+    path: req.originalUrl
   });
 });
 
-// Global Error Handler
+/* ============================
+   GLOBAL ERROR HANDLER
+============================ */
 app.use((err, req, res, next) => {
-  console.error('❌ Server Error:', err);
-  res.status(err.status || 500).json({
+  console.error('❌ Server Error:', err.message);
+  res.status(500).json({
     success: false,
-    message: err.message || 'Internal Server Error',
-    error: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    message: err.message || 'Internal Server Error'
   });
 });
 
-// Start Server
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+/* ============================
+   START SERVER (LOCAL ONLY)
+============================ */
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+  });
+}
 
-// Export for Vercel
 module.exports = app;
