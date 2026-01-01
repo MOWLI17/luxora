@@ -1,198 +1,121 @@
+// server.js - Main Entry Point
+require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
-const dotenv = require('dotenv');
 const mongoose = require('mongoose');
-const path = require('path');
-const cookieParser = require('cookie-parser');
-
-dotenv.config();
+const cors = require('cors');
 
 const app = express();
 
-console.log('[SERVER] Starting LUXORA Backend...');
-console.log('[ENV] NODE_ENV:', process.env.NODE_ENV);
-
-// ===== CORS =====
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:5173',
-  'http://localhost:5000',
-  process.env.FRONTEND_URL,
-  process.env.CLIENT_URL
-].filter(Boolean);
-
-console.log('[CORS] Allowed Origins:', allowedOrigins);
-
+// CORS Configuration
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(null, true);
-  },
+  origin: [
+    'http://localhost:3000',
+    'https://luxora-frontend.vercel.app',
+    'https://luxora-h8qumwleu-mowli17s-projects.vercel.app'
+  ],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.options('*', cors());
-
-// ===== BODY & COOKIES =====
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-app.use(cookieParser());
 
-// ===== DATABASE CONNECTION =====
-const MONGODB_URI = process.env.MONGODB_URI;
-
-if (!MONGODB_URI) {
-  console.error('❌ MONGODB_URI not defined in .env file');
-  process.exit(1);
-}
-
-console.log('[DB] Connecting to MongoDB...');
-console.log('[DB] URI:', MONGODB_URI.substring(0, 50) + '...');
-
-mongoose.connect(MONGODB_URI, {
-  serverSelectionTimeoutMS: 15000,
-  socketTimeoutMS: 45000,
-  retryWrites: true,
-  w: 'majority'
-})
-  .then(() => {
-    console.log('✅ MongoDB Connected Successfully');
-    console.log('📊 Database:', mongoose.connection.name);
-    console.log('🖥️  Host:', mongoose.connection.host);
-  })
-  .catch(err => {
-    console.error('❌ MongoDB Connection Failed');
-    console.error('Error:', err.message);
-    console.log('⚠️  Continuing without database connection...');
-  });
-
-// ===== REQUEST LOGGING =====
+// Logging Middleware
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
 });
 
-// ===== HEALTH CHECK =====
-app.get('/api/health', (req, res) => {
-  const dbStatus = mongoose.connection.readyState === 1 ? '✅ Connected' : '❌ Disconnected';
-  
+// MongoDB Connection
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://Ecom:Mowli12%40@ecom.pbem7rb.mongodb.net/luxora?retryWrites=true&w=majority&authSource=admin';
+
+mongoose.connect(MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+})
+.then(() => {
+  console.log('✅ MongoDB Connected Successfully');
+  console.log('📦 Database:', mongoose.connection.name);
+})
+.catch((err) => {
+  console.error('❌ MongoDB Connection Error:', err.message);
+  process.exit(1);
+});
+
+// Health Check
+app.get('/', (req, res) => {
   res.json({
     success: true,
-    message: 'LUXORA API is healthy',
-    environment: process.env.NODE_ENV,
-    database: dbStatus,
+    message: 'LUXORA API Server Running',
+    timestamp: new Date().toISOString(),
+    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
+  });
+});
+
+app.get('/api', (req, res) => {
+  res.json({
+    success: true,
+    message: 'API is working!',
     timestamp: new Date().toISOString()
   });
 });
 
-app.get('/', (req, res) => {
+app.get('/api/health', (req, res) => {
   res.json({
     success: true,
-    message: '🎉 LUXORA API is running!',
-    health: '/api/health',
-    version: '1.0.0'
+    status: 'ok',
+    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+    timestamp: new Date().toISOString()
   });
 });
 
-// ===== ROUTES =====
-console.log('[ROUTES] Registering API routes...');
+// Import Routes
+const authRoutes = require('./routes/auth');
+const productRoutes = require('./routes/products');
+const sellerAuthRoutes = require('./routes/sellerAuth');
+const sellerProductRoutes = require('./routes/sellerProducts');
+const cartRoutes = require('./routes/cart');
+const wishlistRoutes = require('./routes/wishlist');
+const orderRoutes = require('./routes/orders');
+const paymentRoutes = require('./routes/payment');
 
-app.use('/api/products', require('./routes/products'));
-console.log('✅ Products routes registered');
+// Mount Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/products', productRoutes);
+app.use('/api/seller/auth', sellerAuthRoutes);
+app.use('/api/seller/auth/products', sellerProductRoutes);
+app.use('/api/cart', cartRoutes);
+app.use('/api/wishlist', wishlistRoutes);
+app.use('/api/orders', orderRoutes);
+app.use('/api/payment', paymentRoutes);
 
-try {
-  app.use('/api/auth', require('./routes/auth'));
-  console.log('✅ Auth routes registered');
-} catch (e) {
-  console.warn('⚠️  Auth routes not found');
-}
-
-try {
-  app.use('/api/seller/auth', require('./routes/sellerAuth'));
-  console.log('✅ Seller Auth routes registered');
-} catch (e) {
-  console.warn('⚠️  Seller Auth routes not found');
-}
-
-try {
-  app.use('/api/cart', require('./routes/cart'));
-  console.log('✅ Cart routes registered');
-} catch (e) {
-  console.warn('⚠️  Cart routes not found');
-}
-
-try {
-  app.use('/api/wishlist', require('./routes/wishlist'));
-  console.log('✅ Wishlist routes registered');
-} catch (e) {
-  console.warn('⚠️  Wishlist routes not found');
-}
-
-try {
-  app.use('/api/orders', require('./routes/order'));
-  console.log('✅ Orders routes registered');
-} catch (e) {
-  console.warn('⚠️  Orders routes not found');
-}
-
-try {
-  app.use('/api/payment', require('./routes/payment'));
-  console.log('✅ Payment routes registered');
-} catch (e) {
-  console.warn('⚠️  Payment routes not found');
-}
-
-try {
-  app.use('/api/seller', require('./routes/seller'));
-  console.log('✅ Seller routes registered');
-} catch (e) {
-  console.warn('⚠️  Seller routes not found');
-}
-
-try {
-  app.use('/api/password', require('./routes/password'));
-  console.log('✅ Password routes registered');
-} catch (e) {
-  console.warn('⚠️  Password routes not found');
-}
-
-try {
-  app.use('/api/user', require('./routes/user'));
-  console.log('✅ User routes registered');
-} catch (e) {
-  console.warn('⚠️  User routes not found');
-}
-
-// ===== 404 HANDLER =====
+// 404 Handler
 app.use((req, res) => {
-  console.log(`[404] ${req.method} ${req.path}`);
+  console.log('❌ 404 Not Found:', req.method, req.url);
   res.status(404).json({
     success: false,
     message: 'Route not found',
-    path: req.path
+    path: req.url
   });
 });
 
-// ===== GLOBAL ERROR HANDLER =====
+// Global Error Handler
 app.use((err, req, res, next) => {
   console.error('❌ Server Error:', err);
-  
   res.status(err.status || 500).json({
     success: false,
     message: err.message || 'Internal Server Error',
-    ...(process.env.NODE_ENV === 'development' && { error: err.stack })
+    error: process.env.NODE_ENV === 'development' ? err.stack : undefined
   });
 });
 
-// ===== LOCAL SERVER (DEV ONLY) =====
-if (process.env.NODE_ENV !== 'production') {
-  const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-  });
-}
+// Start Server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+});
 
+// Export for Vercel
 module.exports = app;
