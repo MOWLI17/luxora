@@ -1,305 +1,338 @@
+// src/Api/services.js - FINAL (VercEL READY)
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://luxora-backend-zeta.vercel.app/api';
+/* ======================================================
+   ENV & BASE CONFIG
+====================================================== */
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL ||
+  'https://luxora-backend-zeta.vercel.app/api';
+
 const isDev = process.env.NODE_ENV === 'development';
 
-console.log('[API] Environment:', process.env.NODE_ENV);
-console.log('[API] Base URL:', API_BASE_URL);
+if (isDev) {
+  console.log('[API] Environment:', process.env.NODE_ENV);
+  console.log('[API] Base URL:', API_BASE_URL);
+}
 
+/* ======================================================
+   LOGGER
+====================================================== */
 const logger = {
-  debug: (msg, data) => isDev && console.log(`[API] ${msg}`, data),
-  warn: (msg, data) => console.warn(`[API] ${msg}`, data),
-  error: (msg, data) => console.error(`[API] ${msg}`, data)
+  debug: (...args) => isDev && console.log('[API]', ...args),
+  warn: (...args) => isDev && console.warn('[API]', ...args),
+  error: (...args) => console.error('[API]', ...args),
 };
 
+/* ======================================================
+   AXIOS INSTANCE
+====================================================== */
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 20000,
+  timeout: 15000,
 });
 
-// ===== REQUEST INTERCEPTOR =====
+/* ======================================================
+   AUTH HELPERS
+====================================================== */
+const clearAuthStorage = () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  localStorage.removeItem('sellerToken');
+  localStorage.removeItem('seller');
+};
+
+/* ======================================================
+   REQUEST INTERCEPTOR
+====================================================== */
 api.interceptors.request.use(
   (config) => {
-    const userToken = localStorage.getItem('token');
-    const sellerToken = localStorage.getItem('sellerToken');
-    const token = userToken || sellerToken;
-    
+    const token =
+      localStorage.getItem('token') ||
+      localStorage.getItem('sellerToken');
+
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
-      logger.debug('Request with token for:', config.url);
     }
-    
-    logger.debug('Request:', { url: config.url, method: config.method });
+
+    logger.debug('Request:', config.method?.toUpperCase(), config.url);
     return config;
   },
   (error) => {
-    logger.error('Request interceptor error:', error.message);
+    logger.error('Request error:', error.message);
     return Promise.reject(error);
   }
 );
 
-// ===== RESPONSE INTERCEPTOR =====
+/* ======================================================
+   RESPONSE INTERCEPTOR
+====================================================== */
 api.interceptors.response.use(
   (response) => {
-    logger.debug('Response successful:', response.config.url);
+    logger.debug('Response:', response.config.url);
     return response;
   },
   (error) => {
+    const status = error.response?.status;
+
     logger.error('API Error:', {
       url: error.config?.url,
-      method: error.config?.method,
-      status: error.response?.status,
+      status,
       message: error.message,
     });
 
     if (!error.response) {
-      if (error.message === 'Network Error') {
-        error.customMessage = '❌ Cannot connect to server. Check internet connection.';
-      } else if (error.code === 'ECONNABORTED') {
-        error.customMessage = '⏱️ Request took too long. Please try again.';
+      if (error.code === 'ECONNABORTED') {
+        error.customMessage = 'Request timeout. Please try again.';
       } else {
-        error.customMessage = `❌ ${error.message}`;
+        error.customMessage =
+          'Cannot connect to server. Check your internet connection.';
       }
-    } else if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      localStorage.removeItem('sellerToken');
-      localStorage.removeItem('seller');
-      error.customMessage = 'Session expired. Please login again.';
-      window.location.href = '/';
-    } else if (error.response?.status === 403) {
-      error.customMessage = 'You do not have permission to access this.';
-    } else if (error.response?.status === 404) {
-      error.customMessage = error.response.data?.message || 'Resource not found';
-    } else if (error.response?.status >= 500) {
-      error.customMessage = 'Server error. Please try again later.';
     } else {
-      error.customMessage = error.response.data?.message || 'An error occurred';
+      switch (status) {
+        case 400:
+          error.customMessage =
+            error.response.data?.message || 'Invalid request';
+          break;
+
+        case 401:
+          clearAuthStorage();
+          error.customMessage = 'Session expired. Please login again.';
+          if (window.location.pathname !== '/') {
+            window.location.replace('/');
+          }
+          break;
+
+        case 403:
+          error.customMessage = 'Access denied.';
+          break;
+
+        case 404:
+          error.customMessage =
+            error.response.data?.message || 'Resource not found';
+          break;
+
+        case 409:
+          error.customMessage =
+            error.response.data?.message || 'Conflict occurred';
+          break;
+
+        default:
+          if (status >= 500) {
+            error.customMessage = 'Server error. Try again later.';
+          } else {
+            error.customMessage =
+              error.response.data?.message || 'Unexpected error occurred';
+          }
+      }
     }
 
     return Promise.reject(error);
   }
 );
 
-// ===== USER AUTH =====
+/* ======================================================
+   AUTH SERVICE (USER)
+====================================================== */
 export const authService = {
-  register: (data) => {
-    logger.debug('Register API call');
-    return api.post('/auth/register', data)
-      .then(response => {
-        const { user, token } = response.data;
-        if (token && user) {
-          localStorage.setItem('token', token);
-          localStorage.setItem('user', JSON.stringify(user));
-        }
-        return response.data;
-      });
-  },
-  
-  login: (emailOrMobile, password) => {
-    logger.debug('Login API call');
-    return api.post('/auth/login', { emailOrMobile, password })
-      .then(response => {
-        const { user, token } = response.data;
-        if (token && user) {
-          localStorage.setItem('token', token);
-          localStorage.setItem('user', JSON.stringify(user));
-        }
-        return response.data;
-      });
-  },
-  
-  logout: () => {
-    logger.debug('Logout');
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    return api.post('/auth/logout').catch(() => Promise.resolve());
-  },
-  
-  getProfile: () => {
-    logger.debug('Fetching user profile');
-    return api.get('/auth/profile');
-  },
-  
-  updateProfile: (data) => {
-    logger.debug('Updating user profile');
-    return api.put('/auth/profile', data);
-  },
+  register: (data) =>
+    api.post('/auth/register', data).then((res) => {
+      const user = res.data?.user;
+      const token = res.data?.token;
+      if (user && token) {
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(user));
+      }
+      return res;
+    }),
 
-  changePassword: (data) => {
-    logger.debug('Change password');
-    return api.post('/auth/change-password', data);
-  }
+  login: (emailOrMobile, password) =>
+    api.post('/auth/login', { emailOrMobile, password }).then((res) => {
+      const user = res.data?.user;
+      const token = res.data?.token;
+      if (user && token) {
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(user));
+      }
+      return res;
+    }),
+
+  logout: () => {
+    clearAuthStorage();
+    return Promise.resolve();
+  },
 };
 
-// ===== SELLER AUTH =====
+/* ======================================================
+   USER SERVICE
+====================================================== */
+export const userService = {
+  getProfile: () => api.get('/auth/profile'),
+  updateProfile: (data) => api.put('/auth/profile', data),
+  changePassword: (data) => api.post('/auth/change-password', data),
+  deleteAccount: () => api.delete('/auth/profile'),
+};
+
+/* ======================================================
+   SELLER AUTH SERVICE
+====================================================== */
 export const sellerAuthService = {
-  register: (data) => {
-    logger.debug('Seller registration');
-    return api.post('/seller/auth/register', data)
-      .then(response => {
-        const { seller, token } = response.data;
-        if (token && seller) {
-          localStorage.setItem('sellerToken', token);
-          localStorage.setItem('seller', JSON.stringify(seller));
-        }
-        return response.data;
-      });
-  },
-  
-  login: (email, password) => {
-    logger.debug('Seller login');
-    return api.post('/seller/auth/login', { email, password })
-      .then(response => {
-        const { seller, token } = response.data;
-        if (token && seller) {
-          localStorage.setItem('sellerToken', token);
-          localStorage.setItem('seller', JSON.stringify(seller));
-        }
-        return response.data;
-      });
-  },
-  
+  register: (data) =>
+    api.post('/seller/auth/register', data).then((res) => {
+      if (res.data?.token && res.data?.seller) {
+        localStorage.setItem('sellerToken', res.data.token);
+        localStorage.setItem('seller', JSON.stringify(res.data.seller));
+      }
+      return res;
+    }),
+
+  login: (email, password) =>
+    api.post('/seller/auth/login', { email, password }).then((res) => {
+      if (res.data?.token && res.data?.seller) {
+        localStorage.setItem('sellerToken', res.data.token);
+        localStorage.setItem('seller', JSON.stringify(res.data.seller));
+      }
+      return res;
+    }),
+
   logout: () => {
-    logger.debug('Seller logout');
-    localStorage.removeItem('sellerToken');
-    localStorage.removeItem('seller');
-    return api.post('/seller/auth/logout').catch(() => Promise.resolve());
+    clearAuthStorage();
+    return Promise.resolve();
   },
-  
-  getProfile: () => {
-    return api.get('/seller/auth/profile');
-  },
-  
-  getProducts: () => {
-    return api.get('/seller/auth/products');
-  },
-  
-  getOrders: () => {
-    return api.get('/seller/auth/orders');
-  }
+
+  getProfile: () => api.get('/seller/auth/profile'),
+  updateProfile: (data) => api.put('/seller/auth/profile', data),
+  getProducts: () => api.get('/seller/auth/products'),
+  getOrders: () => api.get('/seller/auth/orders'),
+  updateOrderStatus: (orderId, status) =>
+    api.put(`/seller/auth/orders/${orderId}/status`, { status }),
 };
 
-// ===== PRODUCTS =====
+/* ======================================================
+   PRODUCT SERVICE
+====================================================== */
 export const productService = {
-  getAll: (params) => {
-    logger.debug('Get all products');
-    return api.get('/products', { params });
-  },
-  
-  getById: (id) => {
-    logger.debug('Get product by ID:', id);
-    return api.get(`/products/${id}`);
-  },
-  
-  search: (query) => {
-    logger.debug('Search products:', query);
-    return api.get('/products', { params: { search: query } });
-  },
-  
-  filterByPrice: (minPrice, maxPrice) => {
-    logger.debug('Filter by price:', minPrice, maxPrice);
-    return api.get('/products', { params: { minPrice, maxPrice } });
-  }
+  getAll: (params) => api.get('/products', { params }),
+  getById: (id) => api.get(`/products/${id}`),
+  search: (search) => api.get('/products', { params: { search } }),
+  filterByCategory: (category) =>
+    api.get('/products', { params: { category } }),
+  filterByPrice: (minPrice, maxPrice) =>
+    api.get('/products', { params: { minPrice, maxPrice } }),
+
+  getSellerProducts: () => api.get('/products/seller/my-products'),
+  create: (data) => api.post('/products', data),
+  update: (id, data) => api.put(`/products/${id}`, data),
+  delete: (id) => api.delete(`/products/${id}`),
+  addReview: (id, review) =>
+    api.post(`/products/${id}/review`, review),
 };
 
-// ===== CART =====
+/* ======================================================
+   CART SERVICE
+====================================================== */
 export const cartService = {
-  getCart: () => {
-    logger.debug('Getting cart');
-    return api.get('/cart');
-  },
-  
-  addToCart: (productId, quantity = 1) => {
-    logger.debug('Add to cart:', { productId, quantity });
-    return api.post('/cart', {
-      productId: String(productId).trim(),
-      quantity: parseInt(quantity) || 1
-    });
-  },
-  
-  updateCart: (productId, quantity) => {
-    logger.debug('Update cart:', { productId, quantity });
-    return api.put(`/cart/${productId}`, {
-      quantity: parseInt(quantity) || 1
-    });
-  },
-  
-  removeFromCart: (productId) => {
-    logger.debug('Remove from cart:', productId);
-    return api.delete(`/cart/${productId}`);
-  },
-  
-  clearCart: () => {
-    logger.debug('Clear cart');
-    return api.delete('/cart');
-  }
+  getCart: () => api.get('/cart'),
+
+  addToCart: (productId, quantity = 1) =>
+    api.post('/cart', {
+      productId: String(productId),
+      quantity: Math.max(1, Number(quantity)),
+    }),
+
+  updateCart: (productId, quantity) =>
+    api.put(`/cart/${productId}`, {
+      quantity: Math.max(1, Number(quantity)),
+    }),
+
+  removeFromCart: (productId) =>
+    api.delete(`/cart/${productId}`),
+
+  clearCart: () => api.delete('/cart'),
 };
 
-// ===== WISHLIST =====
+/* ======================================================
+   WISHLIST SERVICE
+====================================================== */
 export const wishlistService = {
-  getWishlist: () => {
-    return api.get('/wishlist');
-  },
-  
-  toggleWishlist: (productId) => {
-    return api.post(`/wishlist/${productId}`);
-  },
-  
-  removeFromWishlist: (productId) => {
-    return api.delete(`/wishlist/${productId}`);
-  }
+  getWishlist: () => api.get('/wishlist'),
+  toggleWishlist: (id) => api.post(`/wishlist/${id}`),
+  removeFromWishlist: (id) => api.delete(`/wishlist/${id}`),
+  clearWishlist: () => api.delete('/wishlist'),
 };
 
-// ===== ORDERS =====
+/* ======================================================
+   ORDER SERVICE
+====================================================== */
 export const orderService = {
-  getMyOrders: () => {
-    return api.get('/orders');
-  },
-  
-  getById: (id) => {
-    return api.get(`/orders/${id}`);
-  },
-  
-  create: (orderData) => {
-    logger.debug('Creating order');
-    return api.post('/orders', orderData);
-  }
+  getAll: (status = 'all', limit = 50, page = 1) =>
+    api.get('/orders', { params: { status, limit, page } }),
+
+  getMyOrders: () => api.get('/orders'),
+  getById: (id) => api.get(`/orders/${id}`),
+  getStats: () => api.get('/orders/user/stats'),
+  create: (data) => api.post('/orders', data),
+  cancel: (id, reason) =>
+    api.put(`/orders/${id}/cancel`, { cancelReason: reason }),
+  delete: (id) => api.delete(`/orders/${id}`),
 };
 
-// ===== PAYMENT =====
+/* ======================================================
+   PAYMENT SERVICE
+====================================================== */
 export const paymentService = {
-  getConfig: () => {
-    return api.get('/payment/config');
-  },
-  
-  createPaymentIntent: (amount, currency = 'inr') => {
-    return api.post('/payment/create-payment-intent', { amount, currency });
-  }
+  getConfig: () => api.get('/payment/config'),
+  createPaymentIntent: (amount, currency = 'inr') =>
+    api.post('/payment/create-payment-intent', { amount, currency }),
+  createOrder: (data) =>
+    api.post('/payment/create-order', data),
+  confirmPayment: (orderId, paymentIntentId) =>
+    api.post('/payment/confirm-payment', {
+      orderId,
+      paymentIntentId,
+    }),
 };
 
-// ===== HELPERS =====
-export const getErrorMessage = (error) => {
-  if (error.customMessage) return error.customMessage;
-  if (error.response?.data?.message) return error.response.data.message;
-  if (error.response?.data?.errors) return error.response.data.errors[0];
-  return error.message || 'An error occurred';
+/* ======================================================
+   PASSWORD SERVICE
+====================================================== */
+export const passwordService = {
+  forgot: (email) => api.post('/password/forgot', { email }),
+  reset: (token, newPassword, confirmPassword) =>
+    api.post(`/password/reset/${token}`, {
+      newPassword,
+      confirmPassword,
+    }),
+  change: (data) => api.post('/password/change', data),
 };
 
-export const isUserLoggedIn = () => !!localStorage.getItem('token');
-export const isSellerLoggedIn = () => !!localStorage.getItem('sellerToken');
+/* ======================================================
+   HELPERS
+====================================================== */
+export const getErrorMessage = (error) =>
+  error.customMessage ||
+  error.response?.data?.message ||
+  error.message ||
+  'Something went wrong';
+
+export const isUserLoggedIn = () =>
+  !!localStorage.getItem('token');
+
+export const isSellerLoggedIn = () =>
+  !!localStorage.getItem('sellerToken');
+
 export const getCurrentUser = () => {
   const user = localStorage.getItem('user');
   return user ? JSON.parse(user) : null;
 };
+
 export const getCurrentSeller = () => {
   const seller = localStorage.getItem('seller');
   return seller ? JSON.parse(seller) : null;
 };
 
 export const API_URL = API_BASE_URL;
-
 export default api;
