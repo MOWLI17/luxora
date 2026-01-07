@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ShoppingCart, Heart, Star, ArrowLeft, Truck, Shield, RotateCcw, Award, Loader } from 'lucide-react';
 import '../CssPages/Productcss/ProductDetail.css'
 
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'https://luxora-backend-zeta.vercel.app/api';
 
 
 const colors = {
