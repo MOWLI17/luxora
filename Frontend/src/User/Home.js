@@ -1,7 +1,7 @@
 import React from 'react'
 import { useState,useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart, Heart, Star, Truck, Shield, RotateCcw, X, Award, Loader } from 'lucide-react';
+import { ShoppingCart, Heart, Star, Truck, Shield, RotateCcw,  Award, Loader } from 'lucide-react';
 import './CssPages/Home.css'
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://luxora-backend-zeta.vercel.app/api';
 
