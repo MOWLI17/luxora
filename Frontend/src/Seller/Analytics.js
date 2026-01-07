@@ -4,7 +4,7 @@ import {  Package, DollarSign, ShoppingBag, Users } from 'lucide-react';
 
 import './CssPage/Analytics.css';
 
-const API_URL = 'https://luxora-backend-sigma.vercel.app/api';
+const API_URL = 'https://luxora-backend-zeta.vercel.app/api';
 
 const Analytics = ({ products = [], confirmedOrders = [] }) => {
   const [stats, setStats] = useState({

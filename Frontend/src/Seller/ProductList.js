@@ -4,7 +4,7 @@ import { Edit2, Trash2, Eye, Search, Filter, AlertCircle, Loader, X } from 'luci
 import Swal from 'sweetalert2';
 import './CssPage/ProductList.css';
 
-const API_URL = 'https://luxora-backend-sigma.vercel.app/api';
+const API_URL = 'https://luxora-backend-zeta.vercel.app/api';
 const ProductList = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);

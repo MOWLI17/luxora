@@ -7,7 +7,7 @@ import Ordernotification from './Ordernotification';
 import Orderhistory from './Orderhistory';
 
 
-const API_URL = 'https://luxora-backend-sigma.vercel.app/api';
+const API_URL = 'https://luxora-backend-zeta.vercel.app/api';
 
 
 const SellerHome = ({ currentSeller }) => {
