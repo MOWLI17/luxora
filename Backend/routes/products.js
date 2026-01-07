@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const Product = require('../models/Product'); // ✅ Changed from products to Product
+const Product = require('../models/Product'); // Try this path first
+
+// If above fails, try this instead:
+// const Product = require('../models/products');
 
 // ===== GET ALL PRODUCTS WITH FILTERS =====
 router.get('/', async (req, res) => {
@@ -46,7 +49,7 @@ router.get('/', async (req, res) => {
 
     // Rating filter
     if (minRating) {
-      filter.rating = { $gte = Number(minRating) };
+      filter.rating = { $gte: Number(minRating) };  // ✅ FIXED: Use colon not equals
     }
 
     // Pagination

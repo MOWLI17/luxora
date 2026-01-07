@@ -1,5 +1,12 @@
 // server.js - Main Entry Point (Local + Vercel Safe)
 
+require('dotenv').config();
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+
+const app = express();
+
 console.log('\n========== ENVIRONMENT VARIABLES DIAGNOSTIC ==========');
 console.log('NODE_ENV:', process.env.NODE_ENV);
 console.log('MONGODB_URI exists:', !!process.env.MONGODB_URI);
@@ -7,40 +14,6 @@ console.log('MONGODB_URI length:', process.env.MONGODB_URI?.length || 0);
 console.log('FRONTEND_URL:', process.env.FRONTEND_URL);
 console.log('CLIENT_URL:', process.env.CLIENT_URL);
 console.log('======================================================\n');
-
-// Also add this route for debugging - PUT IT AFTER HEALTH CHECK ROUTE
-
-app.get('/api/debug', (req, res) => {
-  const dbStatus = mongoose.connection.readyState;
-  const statusText = {
-    0: 'Disconnected',
-    1: 'Connected',
-    2: 'Connecting',
-    3: 'Disconnecting'
-  };
-
-  res.json({
-    success: true,
-    debug: {
-      nodeEnv: process.env.NODE_ENV,
-      mongodbUriExists: !!process.env.MONGODB_URI,
-      mongodbUriFirstChars: process.env.MONGODB_URI?.substring(0, 30) + '...',
-      mongoConnectionState: statusText[dbStatus],
-      mongoConnectionStateCode: dbStatus,
-      mongoHost: mongoose.connection.host || 'Not connected',
-      mongoDatabase: mongoose.connection.name || 'Not connected',
-      frontendUrl: process.env.FRONTEND_URL,
-      clientUrl: process.env.CLIENT_URL,
-      timestamp: new Date().toISOString()
-    }
-  });
-});
-require('dotenv').config();
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-
-const app = express();
 
 /* ============================
    CORS CONFIGURATION
@@ -135,6 +108,33 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// Debug route - NOW AFTER app is initialized
+app.get('/api/debug', (_req, res) => {
+  const dbStatus = mongoose.connection.readyState;
+  const statusText = {
+    0: 'Disconnected',
+    1: 'Connected',
+    2: 'Connecting',
+    3: 'Disconnecting'
+  };
+
+  res.json({
+    success: true,
+    debug: {
+      nodeEnv: process.env.NODE_ENV,
+      mongodbUriExists: !!process.env.MONGODB_URI,
+      mongodbUriFirstChars: process.env.MONGODB_URI?.substring(0, 30) + '...',
+      mongoConnectionState: statusText[dbStatus],
+      mongoConnectionStateCode: dbStatus,
+      mongoHost: mongoose.connection.host || 'Not connected',
+      mongoDatabase: mongoose.connection.name || 'Not connected',
+      frontendUrl: process.env.FRONTEND_URL,
+      clientUrl: process.env.CLIENT_URL,
+      timestamp: new Date().toISOString()
+    }
+  });
+});
+
 /* ============================
    CONNECT DB BEFORE ROUTES
 ============================ */
@@ -152,7 +152,7 @@ app.use(async (req, res, next) => {
 ============================ */
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/products', require('./routes/products'));
-app.use('/api/seller/auth', require('./routes/sellerAuth'));
+app.use('/api/seller/auth', require('./routes/sellerauth'));
 app.use('/api/seller/auth/products', require('./routes/sellerProducts'));
 app.use('/api/cart', require('./routes/cart'));
 app.use('/api/wishlist', require('./routes/wishlist'));
@@ -192,4 +192,3 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 module.exports = app;
-
