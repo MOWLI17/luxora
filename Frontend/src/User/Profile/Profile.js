@@ -2,7 +2,7 @@ import React from 'react'
 import { useState,useEffect,useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
-import { userService,orderService } from '../../Api/services';
+import { userService,orderService } from '../../Api/services.js';
 import '../CssPages/Profilecss/Profile.css'
 
 const Profile = ({currentUser, onLogout }) => {
