@@ -4,7 +4,7 @@ import {
     cartService, 
     orderService,
     getErrorMessage 
-  } from '../Api/services';
+  } from '../Api/services.js';
   
   // Example in a Login component
   const handleLogin = async (emailOrMobile, password) => {
