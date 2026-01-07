@@ -1,7 +1,7 @@
 import React from 'react'
 import { useState, useMemo, useEffect } from 'react';
 import { Route, Routes } from 'react-router-dom';
-import {productService, cartService, wishlistService, orderService}  from '../Api/services'
+import {productService, cartService, wishlistService, orderService}  from '../Api/services.js'
 import Swal from 'sweetalert2';
 import { useNavigate } from 'react-router-dom';
 import Header from './Header';

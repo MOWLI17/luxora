@@ -3,7 +3,10 @@ import './Admin.css';
 import { useState } from 'react';
 import { Users, Store, TrendingUp, AlertCircle, X, Eye, EyeOff, LogOut, ChevronRight, Search } from 'lucide-react';
 
-const API_URL = 'http://localhost:5000/api';
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL ||
+  'https://luxora-backend-zeta.vercel.app/api';
+
 
 function Admin() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
