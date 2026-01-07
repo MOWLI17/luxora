@@ -1,64 +1,71 @@
+// models/Seller.js
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const sellerSchema = new mongoose.Schema({
-  fullName: {
+  name: {
     type: String,
-    required: true,
-    trim: true
+    required: [true, 'Please add seller name'],
+    trim: true,
+    maxlength: [100, 'Name cannot be more than 100 characters']
   },
   email: {
     type: String,
-    required: true,
+    required: [true, 'Please add an email'],
     unique: true,
-    lowercase: true
-  },
-  phone: {
-    type: String,
-    required: true,
-    unique: true
+    lowercase: true,
+    trim: true,
+    match: [
+      /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
+      'Please add a valid email'
+    ]
   },
   password: {
     type: String,
-    required: true,
-    select: false,
-    minlength: 8
+    required: [true, 'Please add a password'],
+    minlength: [6, 'Password must be at least 6 characters'],
+    select: false
+  },
+  phone: {
+    type: String,
+    required: [true, 'Please add a phone number'],
+    trim: true
   },
   businessName: {
     type: String,
-    required: true,
+    required: [true, 'Please add business name'],
     trim: true
   },
-  businessType: {
-    type: String,
-    enum: ['sole', 'partnership', 'pvt', 'llp'],
-    default: 'sole'
+  businessAddress: {
+    addressLine1: String,
+    addressLine2: String,
+    city: String,
+    state: String,
+    pincode: String,
+    country: String
   },
-  businessAddress: String,
-  city: String,
-  state: String,
-  zipCode: String,
-  taxId: String,
-  panNumber: String,
-  gstNumber: String,
-  bankName: String,
-  accountNumber: String,
-  ifscCode: String,
-  accountHolderName: String,
-  storeName: String,
-  storeDescription: String,
-  productCategory: String,
-  role: {
+  gstin: {
     type: String,
-    default: 'seller'
+    trim: true,
+    uppercase: true
+  },
+  bankDetails: {
+    accountNumber: String,
+    ifscCode: String,
+    accountHolderName: String,
+    bankName: String
+  },
+  avatar: {
+    type: String,
+    default: 'https://via.placeholder.com/150'
+  },
+  isVerified: {
+    type: Boolean,
+    default: false
   },
   isActive: {
     type: Boolean,
     default: true
-  },
-  isApproved: {
-    type: Boolean,
-    default: false
   },
   rating: {
     type: Number,
@@ -70,44 +77,33 @@ const sellerSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  createdAt: {
-    type: Date,
-    default: Date.now
+  commission: {
+    type: Number,
+    default: 10,
+    min: 0,
+    max: 100
   },
-  updatedAt: {
-    type: Date,
-    default: Date.now
-  }
+  resetPasswordToken: String,
+  resetPasswordExpire: Date
+}, {
+  timestamps: true
 });
 
-// Hash password before saving
+// Encrypt password before saving
 sellerSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
-
-  try {
-    const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt);
+  if (!this.isModified('password')) {
     next();
-  } catch (error) {
-    next(error);
   }
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
 });
 
-// Method to compare password
-sellerSchema.methods.comparePassword = async function(enteredPassword) {
+// Match password
+sellerSchema.methods.matchPassword = async function(enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-// Get public data (without sensitive info)
-sellerSchema.methods.getPublicData = function() {
-  const seller = this.toObject();
-  delete seller.password;
-  delete seller.bankName;
-  delete seller.accountNumber;
-  delete seller.ifscCode;
-  delete seller.panNumber;
-  delete seller.gstNumber;
-  return seller;
-};
+// Prevent OverwriteModelError
+const Seller = mongoose.models.Seller || mongoose.model('Seller', sellerSchema);
 
-module.exports = mongoose.model('Seller', sellerSchema);
+module.exports = Seller;

@@ -88,7 +88,7 @@ router.get('/', async (req, res) => {
 
     // Rating filter
     if (minRating) {
-      filter.rating = { $gte = Number(minRating) };
+      filter.rating = { $gte: Number(minRating) };
     }
 
     // Pagination
