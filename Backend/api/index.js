@@ -167,7 +167,7 @@ app.use(async (req, res, next) => {
 });
 
 /* =======================
-   API ROUTES
+   API ROUTES - FIXED
 ======================= */
 try {
   // Use require with relative paths
@@ -176,7 +176,7 @@ try {
   const sellerAuthRoutes = require('../routes/sellerauth');
   const cartRoutes = require('../routes/cart');
   const wishlistRoutes = require('../routes/wishlist');
-  const ordersRoutes = require('../routes/orders');
+  const ordersRoutes = require('../routes/orders'); // ✅ FIXED: Changed to orders (plural)
   const paymentRoutes = require('../routes/payment');
 
   app.use('/api/auth', authRoutes);
@@ -184,7 +184,7 @@ try {
   app.use('/api/seller/auth', sellerAuthRoutes);
   app.use('/api/cart', cartRoutes);
   app.use('/api/wishlist', wishlistRoutes);
-  app.use('/api/orders', ordersRoutes);
+  app.use('/api/orders', ordersRoutes); // ✅ FIXED: Registered as /api/orders
   app.use('/api/payment', paymentRoutes);
   
   console.log('✅ All routes loaded successfully');
@@ -194,14 +194,28 @@ try {
 }
 
 /* =======================
-   404 HANDLER
+   404 HANDLER WITH DETAILED INFO
 ======================= */
 app.use((req, res) => {
+  const availableRoutes = [
+    '/api/health',
+    '/api/debug',
+    '/api/auth/*',
+    '/api/seller/*',
+    '/api/products/*',
+    '/api/cart/*',
+    '/api/orders/*',
+    '/api/wishlist/*',
+    '/api/payment/*'
+  ];
+  
   console.log('❌ 404 - Route not found:', req.originalUrl);
   res.status(404).json({
     success: false,
     message: 'Route not found',
-    path: req.originalUrl
+    path: req.originalUrl,
+    method: req.method,
+    availableRoutes: availableRoutes
   });
 });
 

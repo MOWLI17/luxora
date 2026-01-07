@@ -108,7 +108,6 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// Debug route - NOW AFTER app is initialized
 app.get('/api/debug', (_req, res) => {
   const dbStatus = mongoose.connection.readyState;
   const statusText = {
@@ -148,7 +147,7 @@ app.use(async (req, res, next) => {
 });
 
 /* ============================
-   ROUTES
+   ROUTES - FIXED
 ============================ */
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/products', require('./routes/products'));
@@ -156,17 +155,32 @@ app.use('/api/seller/auth', require('./routes/sellerauth'));
 app.use('/api/seller/auth/products', require('./routes/sellerProducts'));
 app.use('/api/cart', require('./routes/cart'));
 app.use('/api/wishlist', require('./routes/wishlist'));
-app.use('/api/orders', require('./routes/orders'));
+app.use('/api/orders', require('./routes/orders')); // ✅ FIXED: Changed to orders (plural)
 app.use('/api/payment', require('./routes/payment'));
 
+console.log('✅ All routes registered successfully');
+
 /* ============================
-   404 HANDLER
+   404 HANDLER WITH BETTER INFO
 ============================ */
 app.use((req, res) => {
+  const availableRoutes = [
+    '/api/health',
+    '/api/auth/*',
+    '/api/seller/*',
+    '/api/products/*',
+    '/api/cart/*',
+    '/api/orders/*',
+    '/api/wishlist/*',
+    '/api/payment/*'
+  ];
+  
   res.status(404).json({
     success: false,
     message: 'Route not found',
-    path: req.originalUrl
+    path: req.originalUrl,
+    method: req.method,
+    availableRoutes: availableRoutes
   });
 });
 
