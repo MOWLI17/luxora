@@ -170,11 +170,11 @@ export const authService = {
    USER SERVICE
 ====================================================== */
 export const userService = {
-  getProfile: () => api.get('/auth/profile'),
-  updateProfile: (data) => api.put('/auth/profile', data),
-  changePassword: (data) => api.post('/auth/change-password', data),
-  deleteAccount: () => api.delete('/auth/profile'),
+  getProfile: () => api.get('/user/profile'),
+  updateProfile: (data) => api.put('/user/profile', data),
+  deleteAccount: () => api.delete('/user/profile')
 };
+
 
 /* ======================================================
    SELLER AUTH SERVICE
