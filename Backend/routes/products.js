@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const Product = require('../models/products');
+const Product = require('../models/Product'); // ✅ Changed from products to Product
 
 // ===== GET ALL PRODUCTS WITH FILTERS =====
 router.get('/', async (req, res) => {
@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
     }
 
     // Category filter
-    if (category && category.trim()) {
+    if (category && category.trim() && category !== 'all') {
       filter.category = { $regex: category, $options: 'i' };
     }
 
@@ -46,7 +46,7 @@ router.get('/', async (req, res) => {
 
     // Rating filter
     if (minRating) {
-      filter.rating = { $gte: Number(minRating) };
+      filter.rating = { $gte = Number(minRating) };
     }
 
     // Pagination
@@ -54,22 +54,25 @@ router.get('/', async (req, res) => {
     const limitNum = Math.max(1, Number(limit));
     const skip = (pageNum - 1) * limitNum;
 
-    console.log('[PRODUCTS] Filters:', filter);
+    console.log('[PRODUCTS] Filters:', JSON.stringify(filter, null, 2));
 
     // Fetch products with sort and pagination
     const products = await Product.find(filter)
+      .populate('seller', 'name email')
       .sort(sort)
       .skip(skip)
       .limit(limitNum)
+      .lean()
       .exec();
 
     const total = await Product.countDocuments(filter);
 
-    console.log(`[PRODUCTS] Found ${products.length} products (Total: ${total})`);
+    console.log(`[PRODUCTS] ✅ Found ${products.length} products (Total: ${total})`);
 
+    // ✅ FIXED: Return in format frontend expects
     res.status(200).json({
       success: true,
-      data: products,
+      products: products,  // ✅ Changed from 'data' to 'products'
       pagination: {
         total,
         page: pageNum,
@@ -79,13 +82,14 @@ router.get('/', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('[PRODUCTS] Error in GET /:', error.message);
+    console.error('[PRODUCTS] ❌ Error in GET /:', error.message);
     console.error(error.stack);
     
     res.status(500).json({
       success: false,
       message: 'Error fetching products',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal Server Error'
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal Server Error',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -104,7 +108,10 @@ router.get('/:id', async (req, res) => {
       });
     }
 
-    const product = await Product.findById(id).populate('reviews.user', 'name email');
+    const product = await Product.findById(id)
+      .populate('seller', 'name email')
+      .populate('reviews.user', 'name email')
+      .lean();
 
     if (!product) {
       return res.status(404).json({
@@ -113,14 +120,14 @@ router.get('/:id', async (req, res) => {
       });
     }
 
-    console.log('[PRODUCTS] Product found:', product.name);
+    console.log('[PRODUCTS] ✅ Product found:', product.name);
     res.status(200).json({
       success: true,
-      data: product
+      product: product  // ✅ Return as 'product'
     });
 
   } catch (error) {
-    console.error('[PRODUCTS] Error in GET /:id:', error.message);
+    console.error('[PRODUCTS] ❌ Error in GET /:id:', error.message);
     
     res.status(500).json({
       success: false,
@@ -134,7 +141,9 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     console.log('[PRODUCTS] POST / - Creating new product');
-    const { name, description, price, originalPrice, category, images, stock, brand, rating } = req.body;
+    console.log('Request body:', req.body);
+    
+    const { name, description, price, originalPrice, category, images, stock, brand, rating, seller } = req.body;
 
     // Validation
     if (!name || !description || !price || !originalPrice || !category || !brand) {
@@ -144,29 +153,41 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // ✅ Get seller from auth or use provided seller ID
+    const sellerId = seller || req.user?.id || req.seller?.id;
+    
+    if (!sellerId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Seller ID is required'
+      });
+    }
+
     const product = new Product({
       name,
       description,
       price: Number(price),
       originalPrice: Number(originalPrice),
+      discount: Math.round(((Number(originalPrice) - Number(price)) / Number(originalPrice)) * 100),
       category,
       images: images || ['https://via.placeholder.com/400'],
       stock: Number(stock) || 0,
       brand,
-      rating: Number(rating) || 0
+      rating: Number(rating) || 0,
+      seller: sellerId
     });
 
     const savedProduct = await product.save();
-    console.log('[PRODUCTS] Product created:', savedProduct._id);
+    console.log('[PRODUCTS] ✅ Product created:', savedProduct._id);
 
     res.status(201).json({
       success: true,
       message: 'Product created successfully',
-      data: savedProduct
+      product: savedProduct
     });
 
   } catch (error) {
-    console.error('[PRODUCTS] Error in POST /:', error.message);
+    console.error('[PRODUCTS] ❌ Error in POST /:', error.message);
     
     res.status(500).json({
       success: false,
@@ -202,15 +223,15 @@ router.put('/:id', async (req, res) => {
       });
     }
 
-    console.log('[PRODUCTS] Product updated:', id);
+    console.log('[PRODUCTS] ✅ Product updated:', id);
     res.status(200).json({
       success: true,
       message: 'Product updated successfully',
-      data: updatedProduct
+      product: updatedProduct
     });
 
   } catch (error) {
-    console.error('[PRODUCTS] Error in PUT /:id:', error.message);
+    console.error('[PRODUCTS] ❌ Error in PUT /:id:', error.message);
     
     res.status(500).json({
       success: false,
@@ -242,14 +263,14 @@ router.delete('/:id', async (req, res) => {
       });
     }
 
-    console.log('[PRODUCTS] Product deleted:', id);
+    console.log('[PRODUCTS] ✅ Product deleted:', id);
     res.status(200).json({
       success: true,
       message: 'Product deleted successfully'
     });
 
   } catch (error) {
-    console.error('[PRODUCTS] Error in DELETE /:id:', error.message);
+    console.error('[PRODUCTS] ❌ Error in DELETE /:id:', error.message);
     
     res.status(500).json({
       success: false,
