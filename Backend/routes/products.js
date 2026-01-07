@@ -1,31 +1,52 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
 
-// Try to require Product model with error handling
+// Try multiple paths to load Product model
 let Product;
 try {
+  // Try relative path first
   Product = require('../models/Product');
-  console.log('✅ Product model loaded successfully');
-} catch (error) {
-  console.error('❌ Error loading Product model:', error.message);
-  console.error('Tried path: ../models/Product');
+  console.log('✅ Product model loaded from ../models/Product');
+} catch (error1) {
+  console.log('⚠️ Could not load from ../models/Product:', error1.message);
+  try {
+    // Try absolute path
+    Product = require(path.join(__dirname, '..', 'models', 'Product'));
+    console.log('✅ Product model loaded from absolute path');
+  } catch (error2) {
+    console.error('❌ Failed to load Product model from any path');
+    console.error('Error 1:', error1.message);
+    console.error('Error 2:', error2.message);
+    console.error('__dirname:', __dirname);
+  }
 }
+
+// Middleware to check if Product model is loaded
+const checkProductModel = (req, res, next) => {
+  if (!Product) {
+    console.error('[PRODUCTS] ❌ Product model not loaded');
+    return res.status(500).json({
+      success: false,
+      message: 'Product model not loaded. Please check server configuration.',
+      error: 'Internal configuration error',
+      debug: {
+        dirname: __dirname,
+        cwd: process.cwd()
+      }
+    });
+  }
+  next();
+};
+
+// Apply middleware to all routes
+router.use(checkProductModel);
 
 // ===== GET ALL PRODUCTS WITH FILTERS =====
 router.get('/', async (req, res) => {
   try {
     console.log('[PRODUCTS] GET / - Started');
     console.log('[PRODUCTS] Query params:', req.query);
-    
-    // Check if Product model is loaded
-    if (!Product) {
-      console.error('[PRODUCTS] ❌ Product model not loaded');
-      return res.status(500).json({
-        success: false,
-        message: 'Product model not loaded',
-        error: 'Internal configuration error'
-      });
-    }
 
     const { 
       search = '', 
@@ -40,7 +61,8 @@ router.get('/', async (req, res) => {
 
     // Build filter object
     const filter = {
-      stock: { $gt: 0 }
+      stock: { $gt: 0 },
+      isActive: true
     };
 
     // Search filter
@@ -66,16 +88,16 @@ router.get('/', async (req, res) => {
 
     // Rating filter
     if (minRating) {
-      filter.rating = { $gte: Number(minRating) };
+      filter.rating = { $gte = Number(minRating) };
     }
 
     // Pagination
     const pageNum = Math.max(1, Number(page));
-    const limitNum = Math.max(1, Number(limit));
+    const limitNum = Math.max(1, Math.min(Number(limit), 100)); // Max 100 items per page
     const skip = (pageNum - 1) * limitNum;
 
     console.log('[PRODUCTS] Filters:', JSON.stringify(filter, null, 2));
-    console.log('[PRODUCTS] About to query database...');
+    console.log('[PRODUCTS] Querying database...');
 
     // Fetch products with sort and pagination
     const products = await Product.find(filter)
@@ -92,6 +114,7 @@ router.get('/', async (req, res) => {
 
     res.status(200).json({
       success: true,
+      count: products.length,
       products: products,
       pagination: {
         total,
@@ -104,7 +127,6 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('[PRODUCTS] ❌ Error in GET /:', error.message);
     console.error('[PRODUCTS] Stack:', error.stack);
-    console.error('[PRODUCTS] Full error:', error);
     
     res.status(500).json({
       success: false,
@@ -120,13 +142,6 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     console.log('[PRODUCTS] GET /:id - ID:', id);
-
-    if (!Product) {
-      return res.status(500).json({
-        success: false,
-        message: 'Product model not loaded'
-      });
-    }
 
     // Check if valid MongoDB ID
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
@@ -170,21 +185,14 @@ router.post('/', async (req, res) => {
   try {
     console.log('[PRODUCTS] POST / - Creating new product');
     console.log('Request body:', req.body);
-    
-    if (!Product) {
-      return res.status(500).json({
-        success: false,
-        message: 'Product model not loaded'
-      });
-    }
 
     const { name, description, price, originalPrice, category, images, stock, brand, rating, seller } = req.body;
 
     // Validation
-    if (!name || !description || !price || !originalPrice || !category || !brand) {
+    if (!name || !description || !price || !category || !brand) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: name, description, price, originalPrice, category, brand'
+        message: 'Missing required fields: name, description, price, category, brand'
       });
     }
 
@@ -201,14 +209,14 @@ router.post('/', async (req, res) => {
       name,
       description,
       price: Number(price),
-      originalPrice: Number(originalPrice),
-      discount: Math.round(((Number(originalPrice) - Number(price)) / Number(originalPrice)) * 100),
+      originalPrice: Number(originalPrice || price),
       category,
       images: images || ['https://via.placeholder.com/400'],
       stock: Number(stock) || 0,
       brand,
       rating: Number(rating) || 0,
-      seller: sellerId
+      seller: sellerId,
+      isActive: true
     });
 
     const savedProduct = await product.save();
@@ -236,13 +244,6 @@ router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     console.log('[PRODUCTS] PUT /:id - Updating product:', id);
-
-    if (!Product) {
-      return res.status(500).json({
-        success: false,
-        message: 'Product model not loaded'
-      });
-    }
 
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({
@@ -287,13 +288,6 @@ router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     console.log('[PRODUCTS] DELETE /:id - Deleting product:', id);
-
-    if (!Product) {
-      return res.status(500).json({
-        success: false,
-        message: 'Product model not loaded'
-      });
-    }
 
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({
