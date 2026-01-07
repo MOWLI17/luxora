@@ -1,15 +1,32 @@
 const express = require('express');
 const router = express.Router();
-const Product = require('../models/Product'); // Try this path first
 
-// If above fails, try this instead:
-// const Product = require('../models/products');
+// Try to require Product model with error handling
+let Product;
+try {
+  Product = require('../models/Product');
+  console.log('✅ Product model loaded successfully');
+} catch (error) {
+  console.error('❌ Error loading Product model:', error.message);
+  console.error('Tried path: ../models/Product');
+}
 
 // ===== GET ALL PRODUCTS WITH FILTERS =====
 router.get('/', async (req, res) => {
   try {
-    console.log('[PRODUCTS] GET / - Query params:', req.query);
+    console.log('[PRODUCTS] GET / - Started');
+    console.log('[PRODUCTS] Query params:', req.query);
     
+    // Check if Product model is loaded
+    if (!Product) {
+      console.error('[PRODUCTS] ❌ Product model not loaded');
+      return res.status(500).json({
+        success: false,
+        message: 'Product model not loaded',
+        error: 'Internal configuration error'
+      });
+    }
+
     const { 
       search = '', 
       category = '', 
@@ -23,7 +40,7 @@ router.get('/', async (req, res) => {
 
     // Build filter object
     const filter = {
-      stock: { $gt: 0 } // Only show in-stock products
+      stock: { $gt: 0 }
     };
 
     // Search filter
@@ -49,7 +66,7 @@ router.get('/', async (req, res) => {
 
     // Rating filter
     if (minRating) {
-      filter.rating = { $gte: Number(minRating) };  // ✅ FIXED: Use colon not equals
+      filter.rating = { $gte: Number(minRating) };
     }
 
     // Pagination
@@ -58,6 +75,7 @@ router.get('/', async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     console.log('[PRODUCTS] Filters:', JSON.stringify(filter, null, 2));
+    console.log('[PRODUCTS] About to query database...');
 
     // Fetch products with sort and pagination
     const products = await Product.find(filter)
@@ -72,10 +90,9 @@ router.get('/', async (req, res) => {
 
     console.log(`[PRODUCTS] ✅ Found ${products.length} products (Total: ${total})`);
 
-    // ✅ FIXED: Return in format frontend expects
     res.status(200).json({
       success: true,
-      products: products,  // ✅ Changed from 'data' to 'products'
+      products: products,
       pagination: {
         total,
         page: pageNum,
@@ -86,12 +103,13 @@ router.get('/', async (req, res) => {
 
   } catch (error) {
     console.error('[PRODUCTS] ❌ Error in GET /:', error.message);
-    console.error(error.stack);
+    console.error('[PRODUCTS] Stack:', error.stack);
+    console.error('[PRODUCTS] Full error:', error);
     
     res.status(500).json({
       success: false,
       message: 'Error fetching products',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal Server Error',
+      error: error.message,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
@@ -102,6 +120,13 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     console.log('[PRODUCTS] GET /:id - ID:', id);
+
+    if (!Product) {
+      return res.status(500).json({
+        success: false,
+        message: 'Product model not loaded'
+      });
+    }
 
     // Check if valid MongoDB ID
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
@@ -126,7 +151,7 @@ router.get('/:id', async (req, res) => {
     console.log('[PRODUCTS] ✅ Product found:', product.name);
     res.status(200).json({
       success: true,
-      product: product  // ✅ Return as 'product'
+      product: product
     });
 
   } catch (error) {
@@ -135,7 +160,7 @@ router.get('/:id', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching product',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal Server Error'
+      error: error.message
     });
   }
 });
@@ -146,6 +171,13 @@ router.post('/', async (req, res) => {
     console.log('[PRODUCTS] POST / - Creating new product');
     console.log('Request body:', req.body);
     
+    if (!Product) {
+      return res.status(500).json({
+        success: false,
+        message: 'Product model not loaded'
+      });
+    }
+
     const { name, description, price, originalPrice, category, images, stock, brand, rating, seller } = req.body;
 
     // Validation
@@ -156,7 +188,6 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // ✅ Get seller from auth or use provided seller ID
     const sellerId = seller || req.user?.id || req.seller?.id;
     
     if (!sellerId) {
@@ -195,7 +226,7 @@ router.post('/', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error creating product',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal Server Error'
+      error: error.message
     });
   }
 });
@@ -205,6 +236,13 @@ router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     console.log('[PRODUCTS] PUT /:id - Updating product:', id);
+
+    if (!Product) {
+      return res.status(500).json({
+        success: false,
+        message: 'Product model not loaded'
+      });
+    }
 
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({
@@ -239,7 +277,7 @@ router.put('/:id', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error updating product',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal Server Error'
+      error: error.message
     });
   }
 });
@@ -249,6 +287,13 @@ router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     console.log('[PRODUCTS] DELETE /:id - Deleting product:', id);
+
+    if (!Product) {
+      return res.status(500).json({
+        success: false,
+        message: 'Product model not loaded'
+      });
+    }
 
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({
@@ -278,7 +323,7 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error deleting product',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal Server Error'
+      error: error.message
     });
   }
 });
