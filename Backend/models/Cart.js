@@ -31,4 +31,7 @@ const cartSchema = new mongoose.Schema({
   }
 });
 
-module.exports = mongoose.model('Cart', cartSchema);
+// Prevent OverwriteModelError in Vercel serverless
+const Cart = mongoose.models.Cart || mongoose.model('Cart', cartSchema);
+
+module.exports = Cart;

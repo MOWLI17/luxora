@@ -54,4 +54,7 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model('Order', orderSchema);
+// Prevent OverwriteModelError in Vercel serverless
+const Order = mongoose.models.Order || mongoose.model('Order', orderSchema);
+
+module.exports = Order;

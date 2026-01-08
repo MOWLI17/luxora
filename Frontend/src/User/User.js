@@ -123,7 +123,7 @@ const User = () => {
     try {
       const token = localStorage.getItem('token');
       const user = localStorage.getItem('user');
-      
+
       if (token && user) {
         const parsedUser = JSON.parse(user);
         console.log('✅ User loaded:', parsedUser.name);
@@ -165,21 +165,33 @@ const User = () => {
         minRating: filters.rating,
         search: searchQuery
       });
-      
-      const productsData = response.data.products || [];
+
+      // Handle various response formats
+      let productsData = [];
+      if (response?.data?.products) {
+        productsData = response.data.products;
+      } else if (Array.isArray(response?.data)) {
+        productsData = response.data;
+      } else if (response?.products) {
+        productsData = response.products;
+      }
+
       console.log('✅ Products loaded:', productsData.length);
       setProducts(productsData);
     } catch (error) {
-      console.error('❌ Error loading products:', error);
-      Swal.fire({
-        title: 'Error',
-        text: 'Failed to load products. Please check if backend is running on port 5000',
-        icon: 'error',
-        toast: true,
-        position: 'top-end',
-        timer: 3000,
-        showConfirmButton: false
-      });
+      console.error('❌ Error loading products:', error?.message || error);
+      // Don't show error toast for 500 errors - backend may still be starting
+      if (error?.response?.status !== 500) {
+        Swal.fire({
+          title: 'Error',
+          text: error?.customMessage || 'Failed to load products',
+          icon: 'error',
+          toast: true,
+          position: 'top-end',
+          timer: 3000,
+          showConfirmButton: false
+        });
+      }
       setProducts([]);
     }
   };
@@ -190,19 +202,19 @@ const User = () => {
       console.log('ℹ️ No user, skipping cart load');
       return;
     }
-    
+
     try {
       console.log('📡 Fetching cart...');
       const response = await cartService.getCart();
-      
+
       console.log('📦 Full Cart Response:', response);
-      
+
       // ✅ FIX: Correct path is response.data.data.cart.items
       const cartItems = response.data?.data?.cart?.items || [];
-      
+
       console.log('✅ Cart loaded:', cartItems.length, 'items');
       console.log('📋 Cart items data:', cartItems);
-      
+
       setCart(Array.isArray(cartItems) ? cartItems : []);
     } catch (error) {
       console.error('❌ Error loading cart:', error);
@@ -216,7 +228,7 @@ const User = () => {
       console.log('ℹ️ No user, skipping wishlist load');
       return;
     }
-    
+
     try {
       console.log('📡 Fetching wishlist...');
       const response = await wishlistService.getWishlist();
@@ -255,7 +267,7 @@ const User = () => {
     console.log('========== ADD TO CART DEBUG START ==========');
     console.log('Product object received:', product);
     console.log('Product keys:', Object.keys(product));
-    
+
     if (!currentUser) {
       const result = await Swal.fire({
         title: 'Please Login',
@@ -265,7 +277,7 @@ const User = () => {
         confirmButtonText: 'Go to Login',
         showCancelButton: true,
       });
-      
+
       if (result.isConfirmed) {
         navigate('/user/login');
       }
@@ -276,25 +288,25 @@ const User = () => {
       // ✅ CRITICAL FIX: Extract productId from product object
       const productId = product._id || product.id;
       const quantity = product.quantity || 1;
-      
+
       console.log('📦 Extracted values:');
       console.log('  productId:', productId, 'type:', typeof productId);
       console.log('  quantity:', quantity, 'type:', typeof quantity);
       console.log('  productName:', product.name);
-      
+
       if (!productId) {
         console.error('❌ productId is falsy:', productId);
         throw new Error('Invalid product ID');
       }
-      
+
       console.log('🛒 Calling cartService.addToCart with:');
       console.log('  Parameters: (productId:', productId, ', quantity:', quantity, ')');
-      
+
       // ✅ FIXED: Pass productId and quantity as separate parameters
       const response = await cartService.addToCart(productId, quantity);
-      
+
       console.log('✅ Add to cart success response:', response.data);
-      
+
       await loadCart();
 
       if (showNotification) {
@@ -308,9 +320,9 @@ const User = () => {
           position: 'top-end',
         });
       }
-      
+
       console.log('========== ADD TO CART DEBUG END (SUCCESS) ==========\n');
-      
+
     } catch (error) {
       console.error('❌ Error adding to cart:', error);
       console.log('Error details:', {
@@ -320,11 +332,11 @@ const User = () => {
         statusText: error.response?.statusText,
         responseData: error.response?.data,
       });
-      
+
       if (error.response?.data) {
         console.error('❌ Backend error response:', JSON.stringify(error.response.data, null, 2));
       }
-      
+
       Swal.fire({
         title: 'Error',
         text: error.customMessage || error.response?.data?.message || 'Failed to add to cart',
@@ -334,7 +346,7 @@ const User = () => {
         timer: 2000,
         showConfirmButton: false
       });
-      
+
       console.log('========== ADD TO CART DEBUG END (ERROR) ==========\n');
     }
   };
@@ -402,7 +414,7 @@ const User = () => {
         confirmButtonText: 'Go to Login',
         showCancelButton: true,
       });
-      
+
       if (result.isConfirmed) {
         navigate('/user/login');
       }
@@ -414,7 +426,7 @@ const User = () => {
       const wasInWishlist = wishlist.some(
         item => (item._id || item.id) === productId
       );
-      
+
       console.log('❤️ Toggling wishlist for:', productId);
       await wishlistService.toggleWishlist(productId);
       await loadWishlist();
@@ -453,7 +465,7 @@ const User = () => {
   const handleCheckout = async (orderPayload) => {
     console.log('========== USER.JS handleCheckout START ==========');
     console.log('Received payload from Cart:', JSON.stringify(orderPayload, null, 2));
-  
+
     // ✅ Check if payload has cartItems (new field name)
     if (!orderPayload || !orderPayload.cartItems || orderPayload.cartItems.length === 0) {
       console.error('❌ No cartItems in payload!');
@@ -465,7 +477,7 @@ const User = () => {
       });
       return;
     }
-  
+
     if (!currentUser) {
       const result = await Swal.fire({
         title: 'Please Login',
@@ -475,23 +487,23 @@ const User = () => {
         confirmButtonText: 'Go to Login',
         showCancelButton: true,
       });
-      
+
       if (result.isConfirmed) {
         navigate('/user/login');
       }
       return;
     }
-  
+
     try {
       console.log('💳 Processing order...');
-  
+
       // ✅ Use cartItems from payload (as structured by Cart.js)
       const cartItems = orderPayload.cartItems;
       const totalAmount = orderPayload.totalAmount || 0;
-  
+
       console.log('📦 Items to send:', cartItems.length, 'items');
       console.log('💰 Total amount:', totalAmount);
-  
+
       // ✅ Build exact payload structure backend expects
       const finalOrderData = {
         cartItems: cartItems,                    // ✅ CRITICAL: Use 'cartItems'
@@ -500,18 +512,18 @@ const User = () => {
         shippingAddress: orderPayload.shippingAddress,  // ✅ Already has correct structure
         paymentIntentId: orderPayload.paymentIntentId || null
       };
-  
+
       console.log('📤 Sending to backend:', JSON.stringify(finalOrderData, null, 2));
-  
+
       // ✅ Call orderService to create order
       // This calls POST /api/payment/create-order
       const response = await orderService.create(finalOrderData);
-      
+
       console.log('✅ Backend response:', response.data);
       const newOrder = response.data.data?.order || response.data;
-  
+
       console.log('✅ Order created with ID:', newOrder._id);
-  
+
       // ✅ Clear the cart after successful order
       try {
         await cartService.clearCart();
@@ -519,9 +531,9 @@ const User = () => {
       } catch (err) {
         console.warn('⚠️ Error clearing cart:', err);
       }
-  
+
       setShowCart(false);
-  
+
       // ✅ Show success message
       const result = await Swal.fire({
         title: 'Order Placed Successfully! 🎉',
@@ -542,16 +554,16 @@ const User = () => {
         cancelButtonColor: '#10b981',
         allowOutsideClick: false,
       });
-  
+
       console.log('========== USER.JS handleCheckout END (SUCCESS) ==========\n');
-  
+
       // ✅ Navigate based on user choice
       if (result.isConfirmed) {
         navigate('/user/profile');
       } else {
         navigate('/user');
       }
-  
+
     } catch (error) {
       console.error('❌ Checkout failed:', error);
       console.log('Error details:', {
@@ -560,9 +572,9 @@ const User = () => {
         backendError: error.response?.data?.message,
         fullResponse: error.response?.data
       });
-  
+
       console.log('========== USER.JS handleCheckout END (ERROR) ==========\n');
-  
+
       // ✅ Show detailed error message
       Swal.fire({
         title: 'Order Failed ❌',
@@ -605,7 +617,7 @@ const User = () => {
         console.log('🗑️ Clearing entire cart...');
         await cartService.clearCart();
         setCart([]);
-        
+
         Swal.fire({
           title: 'Cart Cleared',
           icon: 'success',
@@ -636,7 +648,7 @@ const User = () => {
     setCurrentUser(user);
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));
-    
+
     Swal.fire({
       title: 'Welcome!',
       text: `Logged in as ${user.name}`,
@@ -658,7 +670,7 @@ const User = () => {
     setCurrentUser(user);
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));
-    
+
     Swal.fire({
       title: 'Account Created!',
       text: `Welcome to LUXORA, ${user.name}`,
@@ -680,7 +692,7 @@ const User = () => {
     setWishlist([]);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    
+
     Swal.fire({
       title: 'Logged Out',
       text: 'You have been successfully logged out.',
@@ -697,10 +709,10 @@ const User = () => {
   // ✅ Loading State
   if (loading) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
         height: '100vh',
         fontSize: '24px',
         color: '#6366f1'

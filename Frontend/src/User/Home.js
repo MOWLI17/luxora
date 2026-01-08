@@ -1,12 +1,12 @@
 import React from 'react'
-import { useState,useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart, Heart, Star, Truck, Shield, RotateCcw,  Award, Loader } from 'lucide-react';
+import { ShoppingCart, Heart, Star, Truck, Shield, RotateCcw, Award, Loader } from 'lucide-react';
 import './CssPages/Home.css'
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://luxora-backend-zeta.vercel.app/api';
 
 const Home = ({ onAddToCart, onToggleWishlist, isWishlisted }) => {
-   const navigate = useNavigate();
+  const navigate = useNavigate();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -17,41 +17,46 @@ const Home = ({ onAddToCart, onToggleWishlist, isWishlisted }) => {
     const fetchProducts = async () => {
       try {
         setLoading(true);
+        setError(null);
         console.log('[Home] Fetching products from:', `${API_BASE_URL}/products`);
 
         const response = await fetch(`${API_BASE_URL}/products`);
+        const data = await response.json();
+
+        console.log('[Home] API Response:', { status: response.status, data });
 
         if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
+          console.error('[Home] API Error:', data?.message || `Status ${response.status}`);
+          throw new Error(data?.message || `HTTP error! status: ${response.status}`);
         }
 
-        const data = await response.json();
-        console.log('[Home] Products fetched:', data);
-
-        const productsArray = Array.isArray(data)
-          ? data
-          : data.products
-            ? data.products
-            : [];
+        // Handle various response formats
+        let productsArray = [];
+        if (Array.isArray(data)) {
+          productsArray = data;
+        } else if (data?.products && Array.isArray(data.products)) {
+          productsArray = data.products;
+        } else if (data?.data?.products) {
+          productsArray = data.data.products;
+        }
 
         const transformedProducts = productsArray.map(product => ({
           id: product._id || product.id,
           _id: product._id || product.id,
-          name: product.name,
-          price: product.price,
-          originalPrice: product.originalPrice || product.price * 1.5,
+          name: product.name || 'Unknown Product',
+          price: product.price || 0,
+          originalPrice: product.originalPrice || product.price * 1.2,
           image: product.images?.[0] || '/placeholder-product.jpg',
           category: product.category || 'Other',
-          rating: product.rating || 4.5,
-          reviews: product.reviews || 0,
-          description: product.description || 'No description',
+          rating: product.rating || 0,
+          reviews: product.numReviews || product.reviews || 0,
+          description: product.description || 'No description available',
           stock: product.stock || 0,
           brand: product.brand || 'Unknown'
         }));
 
         console.log('[Home] Transformed products:', transformedProducts.length);
         setProducts(transformedProducts);
-        setError(null);
       } catch (err) {
         console.error('[Home] Error fetching products:', err);
         setError(err.message);

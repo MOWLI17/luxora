@@ -23,4 +23,7 @@ const wishlistSchema = new mongoose.Schema({
   }
 });
 
-module.exports = mongoose.model('Wishlist', wishlistSchema);
+// Prevent OverwriteModelError in Vercel serverless
+const Wishlist = mongoose.models.Wishlist || mongoose.model('Wishlist', wishlistSchema);
+
+module.exports = Wishlist;
