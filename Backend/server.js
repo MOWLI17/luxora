@@ -15,9 +15,9 @@ console.log('MONGODB_URI exists:', !!process.env.MONGODB_URI);
 console.log('MONGODB_URI preview:', process.env.MONGODB_URI?.substring(0, 25) + '...');
 console.log('===================================\n');
 
+// Note: Don't use process.exit in Vercel serverless
 if (!process.env.MONGODB_URI) {
-  console.error('❌ FATAL: MONGODB_URI not found in environment variables');
-  process.exit(1);
+  console.error('❌ WARNING: MONGODB_URI not found in environment variables');
 }
 
 /* ============================
@@ -240,7 +240,7 @@ try {
 } catch (err) {
   console.error('❌ Error loading routes:', err.message);
   console.error('Stack:', err.stack);
-  process.exit(1);
+  // Don't exit - let the server continue and return errors for individual routes
 }
 
 /* ============================
