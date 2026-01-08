@@ -1,52 +1,59 @@
 const express = require('express');
 const router = express.Router();
-const path = require('path');
+const mongoose = require('mongoose');
 
-// Try multiple paths to load Product model
+/* ============================
+   LOAD PRODUCT MODEL (ROBUST)
+============================ */
 let Product;
-try {
-  // Try relative path first
-  Product = require('../models/Product');
-  console.log('✅ Product model loaded from ../models/Product');
-} catch (error1) {
-  console.log('⚠️ Could not load from ../models/Product:', error1.message);
+
+// Check if model already exists (prevents OverwriteModelError)
+if (mongoose.models.Product) {
+  Product = mongoose.models.Product;
+  console.log('✅ Product model already loaded');
+} else {
   try {
-    // Try absolute path
-    Product = require(path.join(__dirname, '..', 'models', 'Product'));
-    console.log('✅ Product model loaded from absolute path');
-  } catch (error2) {
-    console.error('❌ Failed to load Product model from any path');
-    console.error('Error 1:', error1.message);
-    console.error('Error 2:', error2.message);
+    // Try loading from relative path
+    Product = require('../models/Product');
+    console.log('✅ Product model loaded from ../models/Product');
+  } catch (error) {
+    console.error('❌ Failed to load Product model:', error.message);
     console.error('__dirname:', __dirname);
+    console.error('cwd:', process.cwd());
   }
 }
 
-// Middleware to check if Product model is loaded
-const checkProductModel = (req, res, next) => {
+/* ============================
+   MIDDLEWARE: CHECK MODEL LOADED
+============================ */
+const ensureProductModel = (req, res, next) => {
   if (!Product) {
-    console.error('[PRODUCTS] ❌ Product model not loaded');
+    console.error('❌ Product model not available');
     return res.status(500).json({
       success: false,
-      message: 'Product model not loaded. Please check server configuration.',
-      error: 'Internal configuration error',
-      debug: {
-        dirname: __dirname,
-        cwd: process.cwd()
-      }
+      message: 'Product model not initialized',
+      error: 'Server configuration error - Product model missing'
     });
   }
   next();
 };
 
-// Apply middleware to all routes
-router.use(checkProductModel);
+// Apply to all routes
+router.use(ensureProductModel);
 
-// ===== GET ALL PRODUCTS WITH FILTERS =====
+/* ============================
+   GET ALL PRODUCTS WITH FILTERS
+============================ */
 router.get('/', async (req, res) => {
   try {
-    console.log('[PRODUCTS] GET / - Started');
-    console.log('[PRODUCTS] Query params:', req.query);
+    console.log('[PRODUCTS] GET / - Request received');
+    console.log('[PRODUCTS] Query params:', JSON.stringify(req.query));
+    console.log('[PRODUCTS] MongoDB state:', mongoose.connection.readyState);
+
+    // Validate MongoDB connection
+    if (mongoose.connection.readyState !== 1) {
+      throw new Error('Database not connected');
+    }
 
     const { 
       search = '', 
@@ -61,67 +68,79 @@ router.get('/', async (req, res) => {
 
     // Build filter object
     const filter = {
-      stock: { $gt: 0 },
       isActive: true
     };
 
+    // Only add stock filter if products should be in stock
+    // Comment out if you want to show out-of-stock items
+    filter.stock = { $gt: 0 };
+
     // Search filter
     if (search && search.trim()) {
+      const searchRegex = new RegExp(search.trim(), 'i');
       filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { brand: { $regex: search, $options: 'i' } }
+        { name: searchRegex },
+        { description: searchRegex },
+        { brand: searchRegex }
       ];
     }
 
     // Category filter
-    if (category && category.trim() && category !== 'all') {
-      filter.category = { $regex: category, $options: 'i' };
+    if (category && category.trim() && category.toLowerCase() !== 'all') {
+      filter.category = new RegExp(category.trim(), 'i');
     }
 
     // Price filter
-    if (minPrice || maxPrice) {
+    const minPriceNum = Number(minPrice);
+    const maxPriceNum = Number(maxPrice);
+    if (minPriceNum > 0 || maxPriceNum < 999999) {
       filter.price = {};
-      if (minPrice) filter.price.$gte = Number(minPrice);
-      if (maxPrice) filter.price.$lte = Number(maxPrice);
+      if (minPriceNum > 0) filter.price.$gte = minPriceNum;
+      if (maxPriceNum < 999999) filter.price.$lte = maxPriceNum;
     }
 
     // Rating filter
-    if (minRating) {
-      filter.rating = { $gte: Number(minRating) };
+    const minRatingNum = Number(minRating);
+    if (minRatingNum > 0) {
+      filter.rating = { $gte: minRatingNum };
     }
 
     // Pagination
-    const pageNum = Math.max(1, Number(page));
-    const limitNum = Math.max(1, Math.min(Number(limit), 100)); // Max 100 items per page
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, Math.min(parseInt(limit) || 12, 100));
     const skip = (pageNum - 1) * limitNum;
 
-    console.log('[PRODUCTS] Filters:', JSON.stringify(filter, null, 2));
-    console.log('[PRODUCTS] Querying database...');
+    console.log('[PRODUCTS] Filter:', JSON.stringify(filter, null, 2));
+    console.log('[PRODUCTS] Sort:', sort);
+    console.log('[PRODUCTS] Pagination:', { page: pageNum, limit: limitNum, skip });
 
-    // Fetch products with sort and pagination
-    const products = await Product.find(filter)
-      .populate('seller', 'name email')
-      .sort(sort)
-      .skip(skip)
-      .limit(limitNum)
-      .lean()
-      .exec();
+    // Execute query
+    const [products, total] = await Promise.all([
+      Product.find(filter)
+        .populate('seller', 'name email businessName')
+        .sort(sort)
+        .skip(skip)
+        .limit(limitNum)
+        .lean()
+        .exec(),
+      Product.countDocuments(filter).exec()
+    ]);
 
-    const total = await Product.countDocuments(filter);
-
-    console.log(`[PRODUCTS] ✅ Found ${products.length} products (Total: ${total})`);
+    console.log(`[PRODUCTS] ✅ Found ${products.length}/${total} products`);
 
     res.status(200).json({
       success: true,
       count: products.length,
+      total: total,
       products: products,
       pagination: {
-        total,
-        page: pageNum,
-        limit: limitNum,
-        pages: Math.ceil(total / limitNum)
-      }
+        currentPage: pageNum,
+        totalPages: Math.ceil(total / limitNum),
+        pageSize: limitNum,
+        totalItems: total,
+        hasMore: pageNum * limitNum < total
+      },
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
@@ -130,43 +149,55 @@ router.get('/', async (req, res) => {
     
     res.status(500).json({
       success: false,
-      message: 'Error fetching products',
+      message: 'Failed to fetch products',
       error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      details: process.env.NODE_ENV === 'development' ? {
+        stack: error.stack,
+        mongoState: mongoose.connection.readyState
+      } : undefined,
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// ===== GET SINGLE PRODUCT BY ID =====
+/* ============================
+   GET SINGLE PRODUCT BY ID
+============================ */
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    console.log('[PRODUCTS] GET /:id - ID:', id);
+    console.log('[PRODUCTS] GET /:id - Product ID:', id);
 
-    // Check if valid MongoDB ID
-    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+    // Validate MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid product ID format'
+        message: 'Invalid product ID format',
+        providedId: id
       });
     }
 
     const product = await Product.findById(id)
-      .populate('seller', 'name email')
-      .populate('reviews.user', 'name email')
-      .lean();
+      .populate('seller', 'name email businessName phone')
+      .populate('reviews.user', 'name email avatar')
+      .lean()
+      .exec();
 
     if (!product) {
+      console.log('[PRODUCTS] ❌ Product not found:', id);
       return res.status(404).json({
         success: false,
-        message: 'Product not found'
+        message: 'Product not found',
+        productId: id
       });
     }
 
     console.log('[PRODUCTS] ✅ Product found:', product.name);
+    
     res.status(200).json({
       success: true,
-      product: product
+      product: product,
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
@@ -174,141 +205,221 @@ router.get('/:id', async (req, res) => {
     
     res.status(500).json({
       success: false,
-      message: 'Error fetching product',
-      error: error.message
+      message: 'Failed to fetch product',
+      error: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// ===== CREATE PRODUCT (Admin/Seller) =====
+/* ============================
+   CREATE PRODUCT (Protected)
+============================ */
 router.post('/', async (req, res) => {
   try {
     console.log('[PRODUCTS] POST / - Creating new product');
-    console.log('Request body:', req.body);
+    console.log('[PRODUCTS] Body:', JSON.stringify(req.body, null, 2));
 
-    const { name, description, price, originalPrice, category, images, stock, brand, rating, seller } = req.body;
+    const { 
+      name, 
+      description, 
+      price, 
+      originalPrice, 
+      category, 
+      images, 
+      stock, 
+      brand,
+      seller 
+    } = req.body;
 
     // Validation
-    if (!name || !description || !price || !category || !brand) {
+    const missingFields = [];
+    if (!name) missingFields.push('name');
+    if (!description) missingFields.push('description');
+    if (!price) missingFields.push('price');
+    if (!category) missingFields.push('category');
+    if (!brand) missingFields.push('brand');
+
+    if (missingFields.length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: name, description, price, category, brand'
+        message: 'Missing required fields',
+        missingFields: missingFields
       });
     }
 
-    const sellerId = seller || req.user?.id || req.seller?.id;
+    // Get seller ID (from auth middleware or body)
+    const sellerId = seller || req.seller?.id || req.user?.id;
     
     if (!sellerId) {
       return res.status(400).json({
         success: false,
-        message: 'Seller ID is required'
+        message: 'Seller ID is required. Please authenticate.'
       });
     }
 
-    const product = new Product({
-      name,
-      description,
+    // Create product
+    const newProduct = new Product({
+      name: name.trim(),
+      description: description.trim(),
       price: Number(price),
       originalPrice: Number(originalPrice || price),
-      category,
-      images: images || ['https://via.placeholder.com/400'],
+      category: category.trim(),
+      images: Array.isArray(images) && images.length > 0 
+        ? images 
+        : ['https://via.placeholder.com/400x400?text=No+Image'],
       stock: Number(stock) || 0,
-      brand,
-      rating: Number(rating) || 0,
+      brand: brand.trim(),
       seller: sellerId,
+      rating: 0,
+      numReviews: 0,
       isActive: true
     });
 
-    const savedProduct = await product.save();
+    const savedProduct = await newProduct.save();
     console.log('[PRODUCTS] ✅ Product created:', savedProduct._id);
 
     res.status(201).json({
       success: true,
       message: 'Product created successfully',
-      product: savedProduct
+      product: savedProduct,
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
     console.error('[PRODUCTS] ❌ Error in POST /:', error.message);
+    console.error('[PRODUCTS] Stack:', error.stack);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const errors = Object.keys(error.errors).map(key => ({
+        field: key,
+        message: error.errors[key].message
+      }));
+      
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors
+      });
+    }
     
     res.status(500).json({
       success: false,
-      message: 'Error creating product',
-      error: error.message
+      message: 'Failed to create product',
+      error: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// ===== UPDATE PRODUCT =====
+/* ============================
+   UPDATE PRODUCT
+============================ */
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     console.log('[PRODUCTS] PUT /:id - Updating product:', id);
 
-    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid product ID format'
       });
     }
 
+    // Remove immutable fields
+    delete req.body._id;
+    delete req.body.createdAt;
+    
+    // Update timestamp
+    req.body.updatedAt = new Date();
+
     const updatedProduct = await Product.findByIdAndUpdate(
       id,
-      { ...req.body, updatedAt: new Date() },
-      { new: true, runValidators: true }
-    );
+      req.body,
+      { 
+        new: true, 
+        runValidators: true,
+        context: 'query'
+      }
+    ).lean();
 
     if (!updatedProduct) {
       return res.status(404).json({
         success: false,
-        message: 'Product not found'
+        message: 'Product not found',
+        productId: id
       });
     }
 
     console.log('[PRODUCTS] ✅ Product updated:', id);
+    
     res.status(200).json({
       success: true,
       message: 'Product updated successfully',
-      product: updatedProduct
+      product: updatedProduct,
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
     console.error('[PRODUCTS] ❌ Error in PUT /:id:', error.message);
     
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: Object.keys(error.errors).map(key => ({
+          field: key,
+          message: error.errors[key].message
+        }))
+      });
+    }
+    
     res.status(500).json({
       success: false,
-      message: 'Error updating product',
-      error: error.message
+      message: 'Failed to update product',
+      error: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
 
-// ===== DELETE PRODUCT =====
+/* ============================
+   DELETE PRODUCT
+============================ */
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     console.log('[PRODUCTS] DELETE /:id - Deleting product:', id);
 
-    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid product ID format'
       });
     }
 
-    const deletedProduct = await Product.findByIdAndDelete(id);
+    const deletedProduct = await Product.findByIdAndDelete(id).lean();
 
     if (!deletedProduct) {
       return res.status(404).json({
         success: false,
-        message: 'Product not found'
+        message: 'Product not found',
+        productId: id
       });
     }
 
     console.log('[PRODUCTS] ✅ Product deleted:', id);
+    
     res.status(200).json({
       success: true,
-      message: 'Product deleted successfully'
+      message: 'Product deleted successfully',
+      deletedProduct: {
+        id: deletedProduct._id,
+        name: deletedProduct.name
+      },
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
@@ -316,7 +427,44 @@ router.delete('/:id', async (req, res) => {
     
     res.status(500).json({
       success: false,
-      message: 'Error deleting product',
+      message: 'Failed to delete product',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/* ============================
+   FEATURED PRODUCTS
+============================ */
+router.get('/featured/list', async (req, res) => {
+  try {
+    console.log('[PRODUCTS] GET /featured/list');
+
+    const featuredProducts = await Product.find({
+      featured: true,
+      isActive: true,
+      stock: { $gt: 0 }
+    })
+      .populate('seller', 'name businessName')
+      .sort('-rating -createdAt')
+      .limit(10)
+      .lean()
+      .exec();
+
+    res.status(200).json({
+      success: true,
+      count: featuredProducts.length,
+      products: featuredProducts,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('[PRODUCTS] ❌ Error fetching featured products:', error.message);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch featured products',
       error: error.message
     });
   }

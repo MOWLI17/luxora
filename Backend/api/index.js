@@ -56,7 +56,7 @@ async function connectDB() {
   try {
     console.log('🔄 Connecting to MongoDB...');
     console.log('Connection string starts with:', process.env.MONGODB_URI.substring(0, 20));
-    
+
     cachedConnection = await mongoose.connect(process.env.MONGODB_URI, {
       serverSelectionTimeoutMS: 15000,
       socketTimeoutMS: 45000,
@@ -176,17 +176,21 @@ try {
   const sellerAuthRoutes = require('../routes/sellerauth');
   const cartRoutes = require('../routes/cart');
   const wishlistRoutes = require('../routes/wishlist');
-  const ordersRoutes = require('../routes/orders'); // ✅ FIXED: Changed to orders (plural)
+  const ordersRoutes = require('../routes/orders');
   const paymentRoutes = require('../routes/payment');
+  const userRoutes = require('../routes/user');
+  const passwordRoutes = require('../routes/password');
 
   app.use('/api/auth', authRoutes);
   app.use('/api/products', productsRoutes);
   app.use('/api/seller/auth', sellerAuthRoutes);
   app.use('/api/cart', cartRoutes);
   app.use('/api/wishlist', wishlistRoutes);
-  app.use('/api/orders', ordersRoutes); // ✅ FIXED: Registered as /api/orders
+  app.use('/api/orders', ordersRoutes);
   app.use('/api/payment', paymentRoutes);
-  
+  app.use('/api/user', userRoutes);
+  app.use('/api/password', passwordRoutes);
+
   console.log('✅ All routes loaded successfully');
 } catch (err) {
   console.error('❌ Error loading routes:', err.message);
@@ -208,7 +212,7 @@ app.use((req, res) => {
     '/api/wishlist/*',
     '/api/payment/*'
   ];
-  
+
   console.log('❌ 404 - Route not found:', req.originalUrl);
   res.status(404).json({
     success: false,
