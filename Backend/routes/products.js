@@ -7,13 +7,11 @@ const mongoose = require('mongoose');
 ============================ */
 let Product;
 
-// Check if model already exists (prevents OverwriteModelError)
 if (mongoose.models.Product) {
   Product = mongoose.models.Product;
   console.log('✅ Product model already loaded');
 } else {
   try {
-    // Try loading from relative path
     Product = require('../models/Product');
     console.log('✅ Product model loaded from ../models/Product');
   } catch (error) {
@@ -38,12 +36,51 @@ const ensureProductModel = (req, res, next) => {
   next();
 };
 
-// Apply to all routes
 router.use(ensureProductModel);
 
 /* ============================
-   GET ALL PRODUCTS WITH FILTERS
+   ⭐ SPECIFIC ROUTES FIRST (Before :id)
 ============================ */
+
+/* GET FEATURED PRODUCTS */
+router.get('/featured/list', async (req, res) => {
+  try {
+    console.log('[PRODUCTS] GET /featured/list');
+
+    const featuredProducts = await Product.find({
+      featured: true,
+      isActive: true,
+      stock: { $gt: 0 }
+    })
+      .populate('seller', 'name businessName')
+      .sort('-rating -createdAt')
+      .limit(10)
+      .lean()
+      .exec();
+
+    res.status(200).json({
+      success: true,
+      count: featuredProducts.length,
+      products: featuredProducts,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('[PRODUCTS] ❌ Error fetching featured products:', error.message);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch featured products',
+      error: error.message
+    });
+  }
+});
+
+/* ============================
+   GENERAL ROUTES (After specific routes)
+============================ */
+
+/* GET ALL PRODUCTS WITH FILTERS */
 router.get('/', async (req, res) => {
   try {
     console.log('[PRODUCTS] GET / - Request received');
@@ -55,10 +92,10 @@ router.get('/', async (req, res) => {
       throw new Error('Database not connected');
     }
 
-    const { 
-      search = '', 
-      category = '', 
-      minPrice = 0, 
+    const {
+      search = '',
+      category = '',
+      minPrice = 0,
       maxPrice = 999999,
       minRating = 0,
       sort = '-createdAt',
@@ -71,8 +108,6 @@ router.get('/', async (req, res) => {
       isActive: true
     };
 
-    // Only add stock filter if products should be in stock
-    // Comment out if you want to show out-of-stock items
     filter.stock = { $gt: 0 };
 
     // Search filter
@@ -146,7 +181,7 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('[PRODUCTS] ❌ Error in GET /:', error.message);
     console.error('[PRODUCTS] Stack:', error.stack);
-    
+
     res.status(500).json({
       success: false,
       message: 'Failed to fetch products',
@@ -160,9 +195,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-/* ============================
-   GET SINGLE PRODUCT BY ID
-============================ */
+/* GET SINGLE PRODUCT BY ID */
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -193,7 +226,7 @@ router.get('/:id', async (req, res) => {
     }
 
     console.log('[PRODUCTS] ✅ Product found:', product.name);
-    
+
     res.status(200).json({
       success: true,
       product: product,
@@ -202,7 +235,7 @@ router.get('/:id', async (req, res) => {
 
   } catch (error) {
     console.error('[PRODUCTS] ❌ Error in GET /:id:', error.message);
-    
+
     res.status(500).json({
       success: false,
       message: 'Failed to fetch product',
@@ -212,24 +245,22 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-/* ============================
-   CREATE PRODUCT (Protected)
-============================ */
+/* CREATE PRODUCT */
 router.post('/', async (req, res) => {
   try {
     console.log('[PRODUCTS] POST / - Creating new product');
     console.log('[PRODUCTS] Body:', JSON.stringify(req.body, null, 2));
 
-    const { 
-      name, 
-      description, 
-      price, 
-      originalPrice, 
-      category, 
-      images, 
-      stock, 
+    const {
+      name,
+      description,
+      price,
+      originalPrice,
+      category,
+      images,
+      stock,
       brand,
-      seller 
+      seller
     } = req.body;
 
     // Validation
@@ -248,9 +279,8 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Get seller ID (from auth middleware or body)
     const sellerId = seller || req.seller?.id || req.user?.id;
-    
+
     if (!sellerId) {
       return res.status(400).json({
         success: false,
@@ -258,15 +288,14 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Create product
     const newProduct = new Product({
       name: name.trim(),
       description: description.trim(),
       price: Number(price),
       originalPrice: Number(originalPrice || price),
       category: category.trim(),
-      images: Array.isArray(images) && images.length > 0 
-        ? images 
+      images: Array.isArray(images) && images.length > 0
+        ? images
         : ['https://via.placeholder.com/400x400?text=No+Image'],
       stock: Number(stock) || 0,
       brand: brand.trim(),
@@ -289,21 +318,20 @@ router.post('/', async (req, res) => {
   } catch (error) {
     console.error('[PRODUCTS] ❌ Error in POST /:', error.message);
     console.error('[PRODUCTS] Stack:', error.stack);
-    
-    // Handle validation errors
+
     if (error.name === 'ValidationError') {
       const errors = Object.keys(error.errors).map(key => ({
         field: key,
         message: error.errors[key].message
       }));
-      
+
       return res.status(400).json({
         success: false,
         message: 'Validation failed',
         errors: errors
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Failed to create product',
@@ -313,9 +341,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-/* ============================
-   UPDATE PRODUCT
-============================ */
+/* UPDATE PRODUCT */
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -328,18 +354,16 @@ router.put('/:id', async (req, res) => {
       });
     }
 
-    // Remove immutable fields
     delete req.body._id;
     delete req.body.createdAt;
-    
-    // Update timestamp
+
     req.body.updatedAt = new Date();
 
     const updatedProduct = await Product.findByIdAndUpdate(
       id,
       req.body,
-      { 
-        new: true, 
+      {
+        new: true,
         runValidators: true,
         context: 'query'
       }
@@ -354,7 +378,7 @@ router.put('/:id', async (req, res) => {
     }
 
     console.log('[PRODUCTS] ✅ Product updated:', id);
-    
+
     res.status(200).json({
       success: true,
       message: 'Product updated successfully',
@@ -364,7 +388,7 @@ router.put('/:id', async (req, res) => {
 
   } catch (error) {
     console.error('[PRODUCTS] ❌ Error in PUT /:id:', error.message);
-    
+
     if (error.name === 'ValidationError') {
       return res.status(400).json({
         success: false,
@@ -375,7 +399,7 @@ router.put('/:id', async (req, res) => {
         }))
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Failed to update product',
@@ -385,9 +409,7 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-/* ============================
-   DELETE PRODUCT
-============================ */
+/* DELETE PRODUCT */
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -411,7 +433,7 @@ router.delete('/:id', async (req, res) => {
     }
 
     console.log('[PRODUCTS] ✅ Product deleted:', id);
-    
+
     res.status(200).json({
       success: true,
       message: 'Product deleted successfully',
@@ -424,48 +446,12 @@ router.delete('/:id', async (req, res) => {
 
   } catch (error) {
     console.error('[PRODUCTS] ❌ Error in DELETE /:id:', error.message);
-    
+
     res.status(500).json({
       success: false,
       message: 'Failed to delete product',
       error: error.message,
       timestamp: new Date().toISOString()
-    });
-  }
-});
-
-/* ============================
-   FEATURED PRODUCTS
-============================ */
-router.get('/featured/list', async (req, res) => {
-  try {
-    console.log('[PRODUCTS] GET /featured/list');
-
-    const featuredProducts = await Product.find({
-      featured: true,
-      isActive: true,
-      stock: { $gt: 0 }
-    })
-      .populate('seller', 'name businessName')
-      .sort('-rating -createdAt')
-      .limit(10)
-      .lean()
-      .exec();
-
-    res.status(200).json({
-      success: true,
-      count: featuredProducts.length,
-      products: featuredProducts,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('[PRODUCTS] ❌ Error fetching featured products:', error.message);
-    
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch featured products',
-      error: error.message
     });
   }
 });

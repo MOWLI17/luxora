@@ -28,6 +28,7 @@ app.use(cors({
     'http://localhost:3000',
     'https://luxora-take.vercel.app',
     'https://luxora-frontend.vercel.app',
+    'https://luxora-git-main-mowli17s-projects.vercel.app', // Your current preview URL
     /\.vercel\.app$/ // All Vercel preview deployments
   ],
   credentials: true,
@@ -50,6 +51,8 @@ app.use((req, res, next) => {
    MONGODB CONNECTION (CACHED FOR VERCEL)
 ============================ */
 let cachedConnection = null;
+let connectionAttempts = 0;
+const MAX_CONNECTION_ATTEMPTS = 3;
 
 async function connectDB() {
   // Return cached connection if valid
@@ -59,35 +62,53 @@ async function connectDB() {
   }
 
   try {
-    console.log('🔄 Connecting to MongoDB...');
+    console.log(`🔄 Attempting MongoDB connection (Attempt ${connectionAttempts + 1}/${MAX_CONNECTION_ATTEMPTS})...`);
+    console.log('URI starts with:', process.env.MONGODB_URI.substring(0, 30));
 
     cachedConnection = await mongoose.connect(process.env.MONGODB_URI, {
       serverSelectionTimeoutMS: 15000,
       socketTimeoutMS: 45000,
+      socketKeepAliveMS: 30000,
       maxPoolSize: 10,
-      minPoolSize: 2
+      minPoolSize: 2,
+      retryWrites: true,
+      w: 'majority'
     });
 
-    console.log('✅ MongoDB Connected');
+    connectionAttempts = 0; // Reset on successful connection
+    console.log('✅ MongoDB Connected Successfully');
     console.log('📦 Database:', mongoose.connection.name);
     console.log('🏠 Host:', mongoose.connection.host);
 
     return cachedConnection;
   } catch (error) {
-    console.error('❌ MongoDB Connection Error:', error.message);
-    console.error('Stack:', error.stack);
+    connectionAttempts++;
+    console.error('❌ CRITICAL - MongoDB Connection Failed');
+    console.error('Error Message:', error.message);
+    console.error('Error Code:', error.code);
+
+    if (connectionAttempts < MAX_CONNECTION_ATTEMPTS) {
+      console.warn(`⏳ Retrying in 2 seconds... (${connectionAttempts}/${MAX_CONNECTION_ATTEMPTS})`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return connectDB(); // Retry
+    }
+
     throw error;
   }
 }
 
 // Handle MongoDB connection errors
 mongoose.connection.on('error', (err) => {
-  console.error('❌ MongoDB connection error:', err);
+  console.error('❌ MongoDB connection error:', err.message);
 });
 
 mongoose.connection.on('disconnected', () => {
   console.warn('⚠️ MongoDB disconnected');
   cachedConnection = null;
+});
+
+mongoose.connection.on('reconnected', () => {
+  console.log('✅ MongoDB reconnected');
 });
 
 /* ============================
@@ -154,6 +175,12 @@ app.get('/api/debug', async (req, res) => {
     3: 'Disconnecting'
   };
 
+  try {
+    await connectDB();
+  } catch (e) {
+    console.error('Debug route: Could not connect to DB');
+  }
+
   res.json({
     success: true,
     debug: {
@@ -166,7 +193,12 @@ app.get('/api/debug', async (req, res) => {
       mongoConnectionStateCode: dbStatus,
       mongoHost: mongoose.connection.host || 'Not connected',
       mongoDatabase: mongoose.connection.name || 'Not connected',
-      memoryUsage: process.memoryUsage(),
+      memoryUsage: {
+        rss: Math.round(process.memoryUsage().rss / 1024 / 1024) + ' MB',
+        heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
+        heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB'
+      },
+      connectionAttempts: connectionAttempts,
       timestamp: new Date().toISOString()
     }
   });
@@ -184,7 +216,8 @@ app.use(async (req, res, next) => {
     res.status(503).json({
       success: false,
       message: 'Database connection failed',
-      error: process.env.NODE_ENV === 'development' ? err.message : 'Service unavailable'
+      error: process.env.NODE_ENV === 'development' ? err.message : 'Service unavailable',
+      timestamp: new Date().toISOString()
     });
   }
 });

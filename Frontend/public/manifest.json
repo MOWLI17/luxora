@@ -1,14 +1,16 @@
 {
   "short_name": "Luxora",
   "name": "Luxora E-Commerce",
+  "description": "Luxora – A modern full-stack e-commerce platform",
   "icons": [
     {
-      "src": "favicon.ico",
+      "src": "/favicon.ico",
       "sizes": "64x64 32x32 24x24 16x16",
       "type": "image/x-icon"
     }
   ],
-  "start_url": ".",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "theme_color": "#667eea",
   "background_color": "#ffffff"
