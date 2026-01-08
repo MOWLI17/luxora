@@ -1,150 +1,80 @@
-// routes/wishlist.js - Complete Wishlist API with Database Operations
+// ============================================
+// routes/wishlist.js - WISHLIST
+// ============================================
 const express = require('express');
 const router = express.Router();
-const jwt = require('jsonwebtoken');
-const mongoose = require('mongoose');
+const Wishlist = require('../models/Wishlist');
 
-// Load models
-let User, Product;
-if (mongoose.models.User) User = mongoose.models.User;
-else User = require('../models/User');
-if (mongoose.models.Product) Product = mongoose.models.Product;
-else Product = require('../models/Product');
-
-const JWT_SECRET = process.env.JWT_SECRET || 'luxora_jwt_secret_key_2024';
-
-// Auth middleware
-const authenticate = async (req, res, next) => {
+const authMiddleware = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ success: false, message: 'No token' });
+  }
   try {
-    let token;
-    if (req.headers.authorization?.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    }
-    if (!token) {
-      return res.status(401).json({ success: false, message: 'Please login' });
-    }
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = await User.findById(decoded.id);
-    if (!req.user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
+    const decoded = require('jsonwebtoken').verify(
+      token,
+      process.env.JWT_SECRET
+    );
+    req.userId = decoded.id;
     next();
-  } catch (error) {
-    res.status(401).json({ success: false, message: 'Not authorized' });
+  } catch (err) {
+    res.status(401).json({ success: false, message: 'Invalid token' });
   }
 };
 
-/* ============================
-   GET /wishlist - Get user's wishlist
-============================ */
-router.get('/', authenticate, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id)
-      .populate({
-        path: 'wishlist',
-        select: 'name price originalPrice images stock brand category rating'
-      });
-
-    const products = user.wishlist || [];
-
-    res.status(200).json({
-      success: true,
-      wishlist: { products },
-      count: products.length
-    });
-  } catch (error) {
-    console.error('[WISHLIST] Get error:', error.message);
-    res.status(500).json({ success: false, message: 'Failed to get wishlist' });
-  }
-});
-
-/* ============================
-   POST /wishlist/:id - Toggle wishlist (add/remove)
-============================ */
-router.post('/:id', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Validate product exists
-    const product = await Product.findById(id);
-    if (!product) {
-      return res.status(404).json({ success: false, message: 'Product not found' });
-    }
-
-    const user = await User.findById(req.user._id);
-    const wishlistIndex = user.wishlist.findIndex(
-      item => item.toString() === id
+    const wishlist = await Wishlist.findOne({ user: req.userId }).populate(
+      'products'
     );
+    res.json({ success: true, wishlist: wishlist || { products: [] } });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
-    let action;
-    if (wishlistIndex > -1) {
-      // Remove from wishlist
-      user.wishlist.splice(wishlistIndex, 1);
-      action = 'removed';
-    } else {
-      // Add to wishlist
-      user.wishlist.push(id);
-      action = 'added';
+router.post('/:productId', authMiddleware, async (req, res) => {
+  try {
+    let wishlist = await Wishlist.findOne({ user: req.userId });
+    if (!wishlist) {
+      wishlist = new Wishlist({ user: req.userId, products: [] });
     }
 
-    await user.save();
+    const productId = req.params.productId;
+    const index = wishlist.products.indexOf(productId);
 
-    console.log('[WISHLIST] Toggle:', id, action);
+    if (index > -1) {
+      wishlist.products.splice(index, 1);
+    } else {
+      wishlist.products.push(productId);
+    }
 
-    res.status(200).json({
-      success: true,
-      message: `Product ${action} ${action === 'added' ? 'to' : 'from'} wishlist`,
-      action,
-      productId: id
-    });
+    await wishlist.save();
+    res.json({ success: true, wishlist });
   } catch (error) {
-    console.error('[WISHLIST] Toggle error:', error.message);
-    res.status(500).json({ success: false, message: 'Failed to update wishlist' });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-/* ============================
-   DELETE /wishlist/:id - Remove from wishlist
-============================ */
-router.delete('/:id', authenticate, async (req, res) => {
+router.delete('/:productId', authMiddleware, async (req, res) => {
   try {
-    const { id } = req.params;
-
-    const user = await User.findById(req.user._id);
-    user.wishlist = user.wishlist.filter(item => item.toString() !== id);
-    await user.save();
-
-    console.log('[WISHLIST] Removed:', id);
-
-    res.status(200).json({
-      success: true,
-      message: 'Item removed from wishlist',
-      productId: id
-    });
+    const wishlist = await Wishlist.findOne({ user: req.userId });
+    wishlist.products = wishlist.products.filter(
+      (p) => p.toString() !== req.params.productId
+    );
+    await wishlist.save();
+    res.json({ success: true, wishlist });
   } catch (error) {
-    console.error('[WISHLIST] Remove error:', error.message);
-    res.status(500).json({ success: false, message: 'Failed to remove item' });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-/* ============================
-   DELETE /wishlist - Clear wishlist
-============================ */
-router.delete('/', authenticate, async (req, res) => {
+router.delete('/', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
-    user.wishlist = [];
-    await user.save();
-
-    console.log('[WISHLIST] Cleared for user:', req.user._id);
-
-    res.status(200).json({
-      success: true,
-      message: 'Wishlist cleared successfully'
-    });
+    await Wishlist.findOneAndDelete({ user: req.userId });
+    res.json({ success: true, message: 'Wishlist cleared' });
   } catch (error) {
-    console.error('[WISHLIST] Clear error:', error.message);
-    res.status(500).json({ success: false, message: 'Failed to clear wishlist' });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
