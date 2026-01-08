@@ -63,12 +63,12 @@ const handleResponse = async (response, isJson = true) => {
 
   if (!response.ok) {
     console.error('[API] Response error:', response.status, data);
-    
+
     if (response.status === 401) {
       await setToken(null);
       throw new Error(data.message || 'Unauthorized');
     }
-    
+
     throw new Error(data.message || `Error: ${response.statusText}`);
   }
 
@@ -79,7 +79,7 @@ export const authService = {
   login: async (email, password) => {
     try {
       console.log('[AUTH] Login attempt for:', email);
-      
+
       const response = await fetch(`${API_BASE_URL}/seller/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -102,7 +102,7 @@ export const authService = {
   register: async (userData) => {
     try {
       console.log('[AUTH] Register attempt for:', userData.email);
-      
+
       const response = await fetch(`${API_BASE_URL}/seller/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -134,6 +134,48 @@ export const authService = {
       await setToken(null);
       return { success: true };
     }
+  },
+
+  // Get current authenticated seller
+  getCurrentUser: async () => {
+    try {
+      const token = await getToken();
+      if (!token) {
+        console.log('[AUTH] No token found');
+        return null;
+      }
+
+      // First try to get from local storage
+      const seller = await getSeller();
+      if (seller) {
+        console.log('[AUTH] Seller found in storage:', seller.email);
+        return seller;
+      }
+
+      // If not in storage, try to fetch from API
+      console.log('[AUTH] Fetching seller profile from API');
+      const response = await fetch(`${API_BASE_URL}/seller/auth/profile`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        credentials: 'include'
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.seller) {
+          await setSeller(data.seller);
+          return data.seller;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      console.error('[AUTH] getCurrentUser error:', error);
+      return null;
+    }
   }
 };
 
@@ -152,13 +194,13 @@ export const getAllProducts = async () => {
 export const getSellerProducts = async () => {
   try {
     const token = await getToken();
-    
+
     if (!token) {
       throw new Error('Not authenticated');
     }
 
     console.log('[API] Fetching seller products');
-    
+
     const response = await fetch(`${API_BASE_URL}/seller/auth/products`, {
       method: 'GET',
       headers: {
@@ -167,7 +209,7 @@ export const getSellerProducts = async () => {
       },
       credentials: 'include'
     });
-    
+
     const data = await handleResponse(response);
     return data.products || [];
   } catch (error) {
@@ -185,7 +227,7 @@ export const useSellerProducts = () => {
     try {
       setLoading(true);
       const token = await getToken();
-      
+
       if (!token) {
         console.log('[HOOK] No token found');
         setProducts([]);
@@ -232,17 +274,17 @@ export const useDashboardStats = () => {
       try {
         setLoading(true);
         const token = await getToken();
-        
+
         if (!token) {
           console.log('[STATS] No token found');
           return;
         }
 
         const products = await getSellerProducts();
-        const totalValue = Array.isArray(products) 
+        const totalValue = Array.isArray(products)
           ? products.reduce((sum, p) => sum + (parseInt(p.price) || 0), 0)
           : 0;
-        
+
         setStats({
           totalProducts: Array.isArray(products) ? products.length : 0,
           totalSales: `₹${totalValue.toLocaleString()}`,

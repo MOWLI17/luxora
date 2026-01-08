@@ -1,7 +1,7 @@
 import React from 'react'
-import { useState,useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import Welcompage from './Welcompage'
-import { useNavigate, Routes, Route } from 'react-router-dom' 
+import { useNavigate, Routes, Route, Navigate } from 'react-router-dom'
 import Seller from './Seller/Seller'
 import User from './User/User'
 
@@ -13,7 +13,7 @@ const App = () => {
   useEffect(() => {
     const token = localStorage.getItem('token');
     const user = localStorage.getItem('user');
-    
+
     if (token && user) {
       try {
         setCurrentUser(JSON.parse(user));
@@ -27,7 +27,7 @@ const App = () => {
 
   const handleCustomerSelect = () => navigate('/User');
   const handleSellerSelect = () => navigate('/Seller');
-  
+
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -42,37 +42,39 @@ const App = () => {
 
   return (
     <div>
-    <Routes>
-      <Route
-        path="/"
-        element={
-          <Welcompage
-            onCustomerSelect={handleCustomerSelect}
-            onSellerSelect={handleSellerSelect}
-          />
-        }
-      />
-      <Route 
-        path="/User/*" 
-        element={
-          <User 
-            currentUser={currentUser}
-            onLogout={handleLogout}
-            onLogin={handleLogin}
-          />
-        } 
-      />
-      <Route 
-        path="/Seller/*" 
-        element={
-          <Seller 
-            currentUser={currentUser}
-            onLogout={handleLogout}
-            onLogin={handleLogin}
-          />
-        } 
-      />   
-    </Routes>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <Welcompage
+              onCustomerSelect={handleCustomerSelect}
+              onSellerSelect={handleSellerSelect}
+            />
+          }
+        />
+        {/* Redirect /home to /User */}
+        <Route path="/home" element={<Navigate to="/User" replace />} />
+        <Route
+          path="/User/*"
+          element={
+            <User
+              currentUser={currentUser}
+              onLogout={handleLogout}
+              onLogin={handleLogin}
+            />
+          }
+        />
+        <Route
+          path="/Seller/*"
+          element={
+            <Seller
+              currentUser={currentUser}
+              onLogout={handleLogout}
+              onLogin={handleLogin}
+            />
+          }
+        />
+      </Routes>
     </div>
   );
 };
