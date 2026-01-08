@@ -1,10 +1,27 @@
-
 // ============================================
 // routes/sellerauth.js - SELLER AUTHENTICATION
 // ============================================
 const express = require('express');
 const router = express.Router();
 const Seller = require('../models/Seller');
+
+// Auth middleware - MUST be defined before routes use it
+const authMiddleware = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ success: false, message: 'No token' });
+  }
+  try {
+    const decoded = require('jsonwebtoken').verify(
+      token,
+      process.env.JWT_SECRET
+    );
+    req.sellerId = decoded.id;
+    next();
+  } catch (err) {
+    res.status(401).json({ success: false, message: 'Invalid token' });
+  }
+};
 
 router.post('/register', async (req, res) => {
   try {
@@ -66,7 +83,7 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    const seller = await Seller.findOne({ email });
+    const seller = await Seller.findOne({ email }).select('+password');
 
     if (!seller || !(await seller.matchPassword(password))) {
       return res.status(401).json({
@@ -117,22 +134,5 @@ router.put('/profile', authMiddleware, async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
-const authMiddleware = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) {
-    return res.status(401).json({ success: false, message: 'No token' });
-  }
-  try {
-    const decoded = require('jsonwebtoken').verify(
-      token,
-      process.env.JWT_SECRET
-    );
-    req.sellerId = decoded.id;
-    next();
-  } catch (err) {
-    res.status(401).json({ success: false, message: 'Invalid token' });
-  }
-};
 
 module.exports = router;
